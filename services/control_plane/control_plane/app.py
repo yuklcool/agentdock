@@ -321,7 +321,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 _API_DESCRIPTION = """\
-The **control plane** is the public REST + SSE API for Agenhood. Everything the
+The **control plane** is the public REST + SSE API for AgentDock. Everything the
 console does is available here — the console is just one client.
 
 ### Agents are containers
@@ -506,6 +506,8 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(scheduled_tasks_router, prefix="/v1")
     app.include_router(files_router, prefix="/v1")
     app.include_router(console_router, prefix="/v1")
+    from control_plane.routers.nanobot_ws import router as nanobot_ws_router
+    app.include_router(nanobot_ws_router, prefix="/v1")
     app.include_router(git_router, prefix="/v1")
     app.include_router(analytics_router, prefix="/v1")
 

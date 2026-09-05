@@ -21,14 +21,14 @@ def test_classifies_free_anthropic_openai_subscription() -> None:
     assert ant["category"] == "api_key"
     assert ant["credentials"] == ["anthropic_api_key", "anthropic_subscription"]
     # Full-name anthropic models never offer claude-code (alias-only; see below).
-    assert ant["drivers"] == ["opencode", "vanilla", "api"]
+    assert ant["drivers"] == ["opencode", "vanilla", "api", "nanobot"]
 
     # openai in BOTH base and sub → api_key category, both credential methods.
     # gpt-4o is NOT a Codex-tuned model, so codex is filtered out of its drivers.
     gpt4o = entries["gpt-4o"]
     assert gpt4o["category"] == "api_key"
     assert set(gpt4o["credentials"]) == {"openai_api_key", "openai_subscription"}
-    assert gpt4o["drivers"] == ["opencode", "vanilla", "api"]
+    assert gpt4o["drivers"] == ["opencode", "vanilla", "api", "nanobot"]
 
     # openai only in sub → subscription. A *-codex* model keeps the codex driver,
     # but loses vanilla and api — both use the chat-completions adapter, which

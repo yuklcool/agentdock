@@ -6,7 +6,7 @@ from tests.drivers.conformance.matrix import ALL_DRIVERS
 
 pytestmark = pytest.mark.unit
 
-_EXPECTED_NAMES = {"vanilla", "opencode", "codex", "claude-code", "api"}
+_EXPECTED_NAMES = {"vanilla", "opencode", "codex", "claude-code", "api", "nanobot"}
 
 
 def test_every_registered_driver_is_in_the_matrix():

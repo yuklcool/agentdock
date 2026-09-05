@@ -11,6 +11,7 @@ from agentcore.drivers.api import ApiDriver
 from agentcore.drivers.base import Driver
 from agentcore.drivers.claude_code import ClaudeCodeDriver
 from agentcore.drivers.codex import CodexDriver
+from agentcore.drivers.nanobot import NanobotDriver
 from agentcore.drivers.opencode import OpencodeDriver
 from agentcore.drivers.vanilla import VanillaDriver
 from agentcore.llm.anthropic import DEFAULT_BASE_URL, AnthropicClient
@@ -37,6 +38,7 @@ def build_drivers() -> dict[str, Driver]:
         "opencode": OpencodeDriver(),
         "codex": CodexDriver(),
         "claude-code": ClaudeCodeDriver(),
+        "nanobot": NanobotDriver(),
     }
 
 

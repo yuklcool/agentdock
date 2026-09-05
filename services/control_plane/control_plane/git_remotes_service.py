@@ -147,7 +147,7 @@ def public_remote_view(row: dict[str, Any]) -> dict[str, Any]:
 @dataclass(frozen=True)
 class DeployKey:
     private_key: str  # OpenSSH PEM (stored encrypted)
-    public_key: str  # "ssh-ed25519 AAAA… agenhood"
+    public_key: str  # "ssh-ed25519 AAAA… agentdock"
     key_type: str  # "ed25519"
     fingerprint: str  # "SHA256:…"
 
@@ -159,7 +159,7 @@ def _ssh_fingerprint(public_openssh: str) -> str:
     return "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
 
 
-def generate_deploy_key(comment: str = "agenhood") -> DeployKey:
+def generate_deploy_key(comment: str = "agentdock") -> DeployKey:
     """Generate an Ed25519 keypair for a deploy key."""
     key = Ed25519PrivateKey.generate()
     priv = key.private_bytes(

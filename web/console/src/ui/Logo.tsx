@@ -1,11 +1,11 @@
 import { useId } from "react";
 
 /**
- * agenhood logomark — the two-circle brand mark.
+ * agentdock logomark — the two-circle brand mark.
  *
  * A filled disc on the left and an open ring on the right; the disc carries a
  * curved gap where the ring overlaps it, so the pair reads as a linked "a·o".
- * This is the same mark used on agenhood.com's favicon. Monochrome by default
+ * Inherited two-circle mark. Monochrome by default
  * (currentColor) so it inherits the surrounding tile's ink — black on the
  * yellow rail / login tiles. Pass `accent` to tint just the ring.
  */
@@ -14,7 +14,7 @@ type Props = {
   size?: number;
   /** Optional colour for the ring. Defaults to currentColor (monochrome). */
   accent?: string;
-  /** Show the "agenhood" wordmark beside the monogram. */
+  /** Show the "agentdock" wordmark beside the monogram. */
   withWordmark?: boolean;
   className?: string;
   /** Accessible name when the wordmark text isn't rendered. */
@@ -26,7 +26,7 @@ export function Logo({
   accent = "currentColor",
   withWordmark = false,
   className = "",
-  title = "agenhood",
+  title = "agentdock",
 }: Props) {
   // useId() embeds colons (":r0:"); strip them so the id is safe in url(#…).
   const maskId = `logo-gap-${useId().replace(/:/g, "")}`;
@@ -60,7 +60,7 @@ export function Logo({
       </svg>
       {withWordmark && (
         <span style={{ fontWeight: 800, fontSize: Math.round(size * 0.62), letterSpacing: "-0.02em" }}>
-          agenhood
+          agentdock
         </span>
       )}
     </span>

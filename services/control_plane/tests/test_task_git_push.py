@@ -23,7 +23,7 @@ def _remote_row(enabled: bool = True) -> dict:
         "url": "git@github.com:a/b.git",
         "branch": "trunk",
         "ssh_private_key_ciphertext": encrypt_secret(_FAKE_PRIVATE_KEY, KEY),
-        "ssh_public_key": "ssh-ed25519 AAAA… agenhood",
+        "ssh_public_key": "ssh-ed25519 AAAA… agentdock",
         "key_type": "ed25519",
         "key_fingerprint": "SHA256:abc123",
         "enabled": enabled,

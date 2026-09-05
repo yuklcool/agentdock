@@ -133,7 +133,7 @@ export function ApiActivityPanel({ open, onClose }: { open: boolean; onClose: ()
               title={entries.length === 0 ? "No API calls yet" : "No matching calls"}
               description={
                 entries.length === 0
-                  ? "Requests to the agenhood API are logged here as you use the console."
+                  ? "Requests to the agentdock API are logged here as you use the console."
                   : undefined
               }
             />

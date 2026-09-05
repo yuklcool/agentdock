@@ -1,0 +1,43 @@
+[
+  [
+    "task_started",
+    {
+      "driver": "nanobot",
+      "model": "gpt-4o"
+    }
+  ],
+  [
+    "assistant_delta",
+    {
+      "stream_id": "s1",
+      "text": "All done"
+    }
+  ],
+  [
+    "stream_end",
+    {
+      "resuming": false,
+      "stream_id": "s1",
+      "text": "All done"
+    }
+  ],
+  [
+    "token_update",
+    {
+      "tokens_in": 10,
+      "tokens_out": 3
+    }
+  ],
+  [
+    "status_change",
+    {
+      "error": null,
+      "from": "running",
+      "result": {
+        "output": "All done",
+        "success": true
+      },
+      "to": "completed"
+    }
+  ]
+]

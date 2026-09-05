@@ -237,7 +237,7 @@ async def test_web_search_degraded_falls_back_to_wikipedia(tmp_path, monkeypatch
     assert wiki.calls.last.request.url.params["q"] == "bucharest"
     # Wikimedia 403s default library User-Agents; a descriptive one is required.
     ua = wiki.calls.last.request.headers["user-agent"]
-    assert "agenhood" in ua and "python-httpx" not in ua
+    assert "agentdock" in ua and "python-httpx" not in ua
 
 
 @respx.mock

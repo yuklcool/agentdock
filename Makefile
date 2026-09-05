@@ -1,4 +1,4 @@
-VERSION    ?= 1.8.1
+VERSION    ?= 0.1.0-nanobot
 REGISTRY   ?=
 IMAGE      := $(REGISTRY)agent-runtime
 
@@ -14,8 +14,8 @@ models-catalog: ensure-agent-image
 	AGENT_IMAGE=agent-runtime:$(VERSION) .venv/bin/python scripts/gen_model_catalog.py
 
 # ---- Project runner -----------------------------------------------------------
-DEV_PROJECT   := agenhood-dev
-PROD_PROJECT  := agenhood
+DEV_PROJECT   := agentdock-dev
+PROD_PROJECT  := agentdock
 DEV_ENV       := deploy/.env.dev
 PROD_ENV      := deploy/.env
 BASE_COMPOSE  := deploy/docker-compose.yml

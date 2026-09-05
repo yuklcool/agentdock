@@ -24,7 +24,7 @@ export function assemblePrompt(config: AgentConfig, toolSpecs: ToolSpec[]): stri
   return [
     "## SYSTEM",
     "",
-    "You are an agent in the agenhood runtime.",
+    "You are an agent in the agentdock runtime.",
     "",
     "You have access to the following tools. Call them by name with valid JSON arguments:",
     "",

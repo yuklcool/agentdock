@@ -9,7 +9,7 @@ def test_build_drivers_includes_all_launch_drivers() -> None:
     from shim.main import build_drivers
 
     drivers = build_drivers()
-    assert set(drivers) == {"vanilla", "opencode", "codex", "claude-code", "api"}
+    assert set(drivers) == {"vanilla", "opencode", "codex", "claude-code", "api", "nanobot"}
     assert drivers["codex"].name == "codex"
     assert drivers["claude-code"].name == "claude-code"
 

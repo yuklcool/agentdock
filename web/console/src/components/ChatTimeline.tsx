@@ -224,11 +224,28 @@ export function buildItems(events: Event[]): Item[] {
   }
 
   const items: Item[] = [];
+  const streams = new Map<string, Item & { kind: "message"; text: string }>();
   for (const e of events) {
     const p = e.payload as Record<string, any>;
     const id = String(e.seq);
     const before = items.length;
     switch (e.type) {
+      case "assistant_delta":
+      case "reasoning_delta":
+      case "stream_end": {
+        const key = `${e.type === "reasoning_delta" ? "reasoning" : "answer"}:${p.stream_id ?? "default"}`;
+        let item = streams.get(key);
+        if (!item) {
+          item = { id, kind: "message", text: "", ts: e.ts };
+          streams.set(key, item);
+          items.push(item);
+        }
+        if (e.type === "stream_end") item.text = String(p.text ?? item.text);
+        else item.text += String(p.text ?? "");
+        break;
+      }
+      case "reasoning_end":
+        break;
       case "assistant_message": {
         const text = ((p.content as Array<{ type: string; text?: string }> | undefined) ?? [])
           .filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();

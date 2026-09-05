@@ -48,7 +48,8 @@ deploy/.env
 /.worktrees/
 
 # Internal process docs (plans, specs, audits) — not published
-/docs/
+/docs/*
+!/docs/NANOBOT.md
 
 # Local Claude Code config
 .claude/

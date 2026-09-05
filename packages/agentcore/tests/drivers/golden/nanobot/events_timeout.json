@@ -1,0 +1,21 @@
+[
+  [
+    "task_started",
+    {
+      "driver": "nanobot",
+      "model": "gpt-4o"
+    }
+  ],
+  [
+    "status_change",
+    {
+      "error": {
+        "code": "timeout",
+        "message": "timeout"
+      },
+      "from": "running",
+      "result": null,
+      "to": "timed_out"
+    }
+  ]
+]

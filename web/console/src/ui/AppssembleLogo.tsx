@@ -1,7 +1,7 @@
 /**
  * Appssemble logomark — the brand tile (dark rounded square + white "A").
  *
- * Appssemble is the team behind agenhood; this mark is used to credit them.
+ * Appssemble is the team behind agentdock; this mark is used to credit them.
  * Sourced from appssemble.com's favicon. The brand colours are intentionally
  * fixed (not currentColor) so the mark stays on-brand on any surface.
  */

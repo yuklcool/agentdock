@@ -1,3 +1,7 @@
+# AgentDock 部署指南
+
+当前 Agent 镜像包含固定版本的官方 Nanobot。创建实例时选择 Nanobot 驱动，配置与接入方法见 [Nanobot 集成指南](../docs/NANOBOT.md)。
+
 # Deploy: single-host topology
 
 This brings up the full agent runtime on one host (spec §10): Traefik, the web
@@ -9,7 +13,7 @@ onto `agent-runtime-internal` only.
 
 For day-to-day development use the repo-root `make dev` / `make stop` instead of
 the production compose below. It applies `docker-compose.dev.yml` on top of this
-file under the `agenhood-dev` project: the control plane runs with `--reload`,
+file under the `agentdock-dev` project: the control plane runs with `--reload`,
 the console runs a Vite dev server on `http://localhost:5173` (proxying `/v1` and
 `/admin` to the control plane), and Traefik is not started. Secrets come from the
 committed, insecure `deploy/.env.dev`.
@@ -17,7 +21,7 @@ committed, insecure `deploy/.env.dev`.
 ## Prerequisites
 
 - Docker + docker compose v2.
-- The agent image built (Unit 1): `make image` → `agent-runtime:1.0.0`.
+- The agent image built (Unit 1): `make image` → `agent-runtime:0.1.0-nanobot`.
 - **After bumping the agent image / opencode version**, regenerate and commit the
   model catalog: `make models-catalog` (Docker required; set
   `MODELS_CATALOG_CODEX_AUTH=/path/to/codex-auth.json` to include OpenAI

@@ -176,7 +176,7 @@ services:
       # the default matches THIS deployment's project network. Inert under a plain
       # `docker compose` run (no Traefik docker provider reads it); for
       # non-Coolify/standalone use see deploy/docker-compose.yml.
-      - "traefik.docker.network=${TRAEFIK_BACKEND_NETWORK:-agenhood-production}"
+      - "traefik.docker.network=${TRAEFIK_BACKEND_NETWORK:-agentdock-production}"
 
 networks:
   agent-runtime-internal:

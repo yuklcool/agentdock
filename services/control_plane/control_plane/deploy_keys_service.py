@@ -24,7 +24,7 @@ def build_deploy_key_row(
         raise ValueError("name is required")
     if len(name) > MAX_NAME:
         raise ValueError(f"name exceeds {MAX_NAME} chars")
-    keypair = generate_deploy_key(comment=f"agenhood-skill-{name}")
+    keypair = generate_deploy_key(comment=f"agentdock-skill-{name}")
     now = datetime.now(UTC)
     return {
         "id": new_deploy_key_id(),

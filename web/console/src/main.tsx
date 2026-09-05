@@ -5,7 +5,7 @@ import { RouterProvider } from "react-router-dom";
 import { router } from "./routes/router";
 import { ToastProvider } from "./components/Toast";
 import "./index.css";
-import "./styles/agenhood.css";
+import "./styles/agentdock.css";
 import "./styles/login.css";
 
 const queryClient = new QueryClient({

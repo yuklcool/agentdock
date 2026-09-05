@@ -6,6 +6,7 @@ from agentcore.drivers import (
 from agentcore.drivers import (
     claude_code,  # noqa: F401  (claude-code CLI)
     codex,  # noqa: F401  (Unit 3 — codex CLI)
+    nanobot,  # noqa: F401  (independent Nanobot gateway)
     opencode,  # noqa: F401  (Unit 3)
     vanilla,  # noqa: F401  (Unit 1)
 )

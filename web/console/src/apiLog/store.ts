@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import type { ApiLogEntry } from "./types";
 
 export const CAPACITY = 200;
-const STORAGE_KEY = "agenhood.apiLog";
+const STORAGE_KEY = "agentdock.apiLog";
 
 let entries: ApiLogEntry[] = load();
 // Resume the id counter past any entries restored from sessionStorage so a

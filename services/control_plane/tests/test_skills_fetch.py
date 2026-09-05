@@ -17,10 +17,10 @@ pytestmark = pytest.mark.unit
 
 
 # Enable file:// git sources for all tests in this module (Fix 4: production
-# disallows file:// — tests opt-in with AGENHOOD_ALLOW_FILE_SKILL_SOURCE=1).
+# disallows file:// — tests opt-in with AGENTDOCK_ALLOW_FILE_SKILL_SOURCE=1).
 @pytest.fixture(autouse=True)
 def _allow_file_sources(monkeypatch):
-    monkeypatch.setenv("AGENHOOD_ALLOW_FILE_SKILL_SOURCE", "1")
+    monkeypatch.setenv("AGENTDOCK_ALLOW_FILE_SKILL_SOURCE", "1")
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +310,7 @@ def test_list_branches_unreachable_raises(tmp_path) -> None:
 def test_fetch_git_skill_rejects_file_url_without_flag(monkeypatch) -> None:
     """file:// skill sources are disabled by default; the autouse fixture sets the
     flag, so we delete it here to test the production guard."""
-    monkeypatch.delenv("AGENHOOD_ALLOW_FILE_SKILL_SOURCE", raising=False)
+    monkeypatch.delenv("AGENTDOCK_ALLOW_FILE_SKILL_SOURCE", raising=False)
     with pytest.raises(ValueError, match="file://"):
         fetch_git_skill(url="file:///tmp/any-repo", subpath="", ref="main")
 

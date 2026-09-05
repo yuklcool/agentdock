@@ -1,7 +1,7 @@
 /* ============================================================================
    Login — "Operations Floor"
-   Namespaced (.lgn-*) restyle of the sign-in page. Reuses the agenhood design
-   tokens from agenhood.css; falls back to literals so it renders standalone.
+   Namespaced (.lgn-*) restyle of the sign-in page. Reuses the agentdock design
+   tokens from agentdock.css; falls back to literals so it renders standalone.
    ========================================================================== */
 
 .lgn {
