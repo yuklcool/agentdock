@@ -1,0 +1,86 @@
+[
+  [
+    "task_started",
+    {
+      "driver": "nanobot",
+      "model": "gpt-4o"
+    }
+  ],
+  [
+    "reasoning_delta",
+    {
+      "stream_id": "r1",
+      "text": "Consider"
+    }
+  ],
+  [
+    "reasoning_end",
+    {
+      "stream_id": "r1",
+      "text": ""
+    }
+  ],
+  [
+    "log",
+    {
+      "level": "info",
+      "message": "Working"
+    }
+  ],
+  [
+    "assistant_delta",
+    {
+      "stream_id": "s1",
+      "text": "Before tool"
+    }
+  ],
+  [
+    "stream_end",
+    {
+      "resuming": true,
+      "stream_id": "s1",
+      "text": "Before tool"
+    }
+  ],
+  [
+    "assistant_delta",
+    {
+      "stream_id": "s2",
+      "text": "After "
+    }
+  ],
+  [
+    "assistant_delta",
+    {
+      "stream_id": "s2",
+      "text": "tool"
+    }
+  ],
+  [
+    "stream_end",
+    {
+      "resuming": false,
+      "stream_id": "s2",
+      "text": "After tool!"
+    }
+  ],
+  [
+    "token_update",
+    {
+      "tokens_in": 12,
+      "tokens_out": 8
+    }
+  ],
+  [
+    "status_change",
+    {
+      "error": null,
+      "from": "running",
+      "result": {
+        "output": "Before tool\n\nAfter tool!",
+        "success": true
+      },
+      "to": "completed"
+    }
+  ]
+]

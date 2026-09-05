@@ -567,3 +567,25 @@ describe("ChatTimeline — rendered durations", () => {
     expect(screen.queryByText("2.0s")).not.toBeInTheDocument();
   });
 });
+
+describe("Nanobot streaming", () => {
+  it("merges deltas and applies the final rewritten segment without duplication", () => {
+    const items = buildItems([
+      evt(1, "assistant_delta", { stream_id: "s1", text: "Hello " }),
+      evt(2, "assistant_delta", { stream_id: "s1", text: "world" }),
+      evt(3, "stream_end", { stream_id: "s1", text: "Hello world!" }),
+      evt(4, "assistant_delta", { stream_id: "s2", text: "Next segment" }),
+    ]);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ kind: "message", text: "Hello world!" });
+    expect(items[1]).toMatchObject({ kind: "message", text: "Next segment" });
+  });
+  it("keeps reasoning and answer streams separate even with the same stream id", () => {
+    const items = buildItems([
+      evt(1, "reasoning_delta", { stream_id: "s1", text: "Thinking" }),
+      evt(2, "reasoning_end", { stream_id: "s1" }),
+      evt(3, "assistant_delta", { stream_id: "s1", text: "Answer" }),
+    ]);
+    expect(items.map(i => i.kind === "message" && i.text)).toEqual(["Thinking", "Answer"]);
+  });
+});

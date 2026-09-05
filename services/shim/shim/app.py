@@ -7,7 +7,8 @@ import shutil
 import tarfile
 import uuid
 import zipfile
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
@@ -111,9 +112,24 @@ def create_app(
     drivers: dict[str, Any] | None = None,
     max_workers: int = 4,
 ) -> FastAPI:
-    app = FastAPI()
-    auth = TokenAuth(token=token)
     registry = drivers if drivers is not None else DRIVERS
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        for runner in runners.values():
+            runner.request_cancel()
+        if bg_tasks:
+            _, pending = await asyncio.wait(set(bg_tasks), timeout=10)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+        nanobot_driver = registry.get("nanobot")
+        if nanobot_driver is not None and hasattr(nanobot_driver, "close"):
+            await nanobot_driver.close()
+
+    app = FastAPI(lifespan=lifespan)
+    auth = TokenAuth(token=token)
     max_worker_limit = max_workers
 
     runners: dict[str, TaskRunner] = {}

@@ -50,7 +50,7 @@ export default function Login() {
         <div className="lgn-stage-inner">
           <div className="lgn-mark lgn-rise" style={rise(40)}>
             <span className="lgn-logo-tile"><Logo size={22} /></span>
-            <span className="lgn-logo-word">agenhood</span>
+            <span className="lgn-logo-word">agentdock</span>
           </div>
 
           <div>
@@ -75,7 +75,7 @@ export default function Login() {
             <AppssembleLogo size={16} className="lgn-by-logo" />
             Built by Appssemble
             <span className="lgn-status-sep">·</span>
-            <span className="lgn-status-mono">agenhood/console</span>
+            <span className="lgn-status-mono">agentdock/console</span>
           </a>
         </div>
       </aside>
@@ -137,7 +137,7 @@ export default function Login() {
           </form>
 
           <p className="lgn-foot lgn-rise" style={rise(460)}>
-            Trouble signing in? <a className="lgn-link" href="mailto:support@agenhood.com">Contact your workspace admin</a>.
+            Trouble signing in? <span className="lgn-link">Contact your workspace admin</span>.
           </p>
         </div>
       </main>

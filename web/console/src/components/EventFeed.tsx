@@ -23,6 +23,12 @@ function EventBody({ cid, ev }: { cid: string; ev: Event }) {
   switch (ev.type) {
     case "task_started":
       return <span>driver <b>{p.driver}</b> · model <b>{p.model}</b></span>;
+    case "assistant_delta":
+    case "reasoning_delta":
+    case "stream_end":
+      return <span>{String(p.text ?? "")}</span>;
+    case "reasoning_end":
+      return <span>Reasoning complete</span>;
     case "assistant_message": {
       const text = (p.content as any[] | undefined)
         ?.filter((b) => b.type === "text")

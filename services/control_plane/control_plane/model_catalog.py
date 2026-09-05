@@ -42,8 +42,8 @@ _API_KEY_METHOD = {
 _PROVIDER_DRIVERS = {
     "opencode": ["opencode"],          # Zen: free (-free suffix) or keyed
     "opencode-go": ["opencode", "vanilla", "api"],  # Go plan: keyed (same key as Zen)
-    "anthropic": ["opencode", "vanilla", "api"],
-    "openai": ["opencode", "codex", "vanilla", "api"],
+    "anthropic": ["opencode", "vanilla", "api", "nanobot"],
+    "openai": ["opencode", "codex", "vanilla", "api", "nanobot"],
 }
 
 # The only model ids the claude-code driver offers. The `claude` CLI resolves
@@ -176,6 +176,8 @@ def build_catalog_entries(
                 drivers.remove("vanilla")
             if "api" in drivers:
                 drivers.remove("api")
+            if "nanobot" in drivers:
+                drivers.remove("nanobot")
         out.append({
             "id": entry_id,
             "provider": provider,

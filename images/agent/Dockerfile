@@ -33,6 +33,13 @@ RUN --mount=type=cache,target=/root/.cache/uv,id=uv-${TARGETARCH} \
     uv pip install --python /opt/venv/bin/python --no-deps /src/agentcore \
     && uv pip install --python /opt/venv/bin/python --no-deps /src/shim
 
+# Independent Nanobot distribution; the source revision is protocol-tested.
+ARG NANOBOT_COMMIT=455533169d5a641300dd63d260b1ff5543c4093c
+RUN --mount=type=cache,target=/root/.cache/uv,id=nanobot-${TARGETARCH} \
+    uv venv /opt/nanobot \
+    && NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python /opt/nanobot/bin/python \
+       "https://github.com/HKUDS/nanobot/archive/${NANOBOT_COMMIT}.tar.gz"
+
 ############ runtime ############
 FROM python:3.12-slim-bookworm AS runtime
 ARG VARIANT=full
@@ -142,6 +149,8 @@ RUN mkdir -p /opt/node-proxy \
 COPY images/agent/node-proxy-preload.cjs /opt/node-proxy/preload.cjs
 
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/nanobot /opt/nanobot
+RUN ln -s /opt/nanobot/bin/nanobot /usr/local/bin/nanobot
 ENV PATH="/opt/venv/bin:${PATH}"
 ENV CHROMIUM_PATH=/usr/bin/chromium
 # Load the proxy shim into every node process (workspace scripts included). Set

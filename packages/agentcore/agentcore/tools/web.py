@@ -130,8 +130,8 @@ class WebSearchTool:
                 # requires a descriptive one with a contact URL).
                 headers={
                     "User-Agent": (
-                        "agenhood-web-search/1.0 "
-                        "(https://github.com/appssemble/agenhood-public)"
+                        "agentdock-web-search/1.0 "
+                        "(https://github.com/yuklcool/agentdock)"
                     )
                 },
             ) as http:

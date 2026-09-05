@@ -1,0 +1,21 @@
+[
+  [
+    "task_started",
+    {
+      "driver": "nanobot",
+      "model": "gpt-4o"
+    }
+  ],
+  [
+    "status_change",
+    {
+      "error": {
+        "code": "nanobot_protocol_error",
+        "message": "nanobot_protocol_error"
+      },
+      "from": "running",
+      "result": null,
+      "to": "failed"
+    }
+  ]
+]

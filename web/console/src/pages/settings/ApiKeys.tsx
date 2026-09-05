@@ -80,7 +80,7 @@ export default function ApiKeys() {
           </span>
         </div>
         <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>
-          Programmatic credentials for machine access to the agenhood API.
+          Programmatic credentials for machine access to the agentdock API.
         </div>
       </div>
 
@@ -208,7 +208,7 @@ export default function ApiKeys() {
                 title={rows.length === 0 ? "No API keys yet" : "No active keys"}
                 description={
                   rows.length === 0
-                    ? "Create a key to access the agenhood API programmatically."
+                    ? "Create a key to access the agentdock API programmatically."
                     : "Switch to “All keys” to see previously issued keys."
                 }
               />

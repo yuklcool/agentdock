@@ -2,7 +2,7 @@
 # Post-`make dev` smoke check: control plane healthy + console serving.
 set -eu
 
-PROJECT="agenhood-dev"
+PROJECT="agentdock-dev"
 echo "==> control-plane /healthz"
 docker compose -p "$PROJECT" \
   -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml \

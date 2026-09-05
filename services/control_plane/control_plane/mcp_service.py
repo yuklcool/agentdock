@@ -37,7 +37,7 @@ def validate_mcp_fields(
             f"description must be 1-{MAX_DESCRIPTION} chars", "description",
         )
     if not url.startswith("https://") and not (
-        url.startswith("http://") and os.environ.get("AGENHOOD_ALLOW_HTTP_MCP_SOURCE") == "1"
+        url.startswith("http://") and os.environ.get("AGENTDOCK_ALLOW_HTTP_MCP_SOURCE") == "1"
     ):
         raise api_error(400, "validation_error", "url must be an https:// URL", "url")
     if auth_type not in AUTH_TYPES:

@@ -12,7 +12,7 @@ import { SubmitTaskChat } from "./SubmitTaskChat";
 import { SessionPicker } from "../components/SessionPicker";
 
 type Layout = "form" | "chat";
-const LAYOUT_KEY = "agenhood.submitLayout";
+const LAYOUT_KEY = "agentdock.submitLayout";
 
 export default function SubmitTask() {
   const { cid } = useParams<{ cid: string }>();

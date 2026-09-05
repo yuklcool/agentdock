@@ -139,17 +139,17 @@ def _validate_url(url: str, *, has_key: bool = False) -> None:
         return
     if url.startswith("https://"):
         return
-    if url.startswith("file://") and os.environ.get("AGENHOOD_ALLOW_FILE_SKILL_SOURCE") == "1":
+    if url.startswith("file://") and os.environ.get("AGENTDOCK_ALLOW_FILE_SKILL_SOURCE") == "1":
         return
     if url.startswith("file://"):
         raise ValueError(
             "file:// skill sources are disabled in production; "
-            "set AGENHOOD_ALLOW_FILE_SKILL_SOURCE=1 to enable in tests"
+            "set AGENTDOCK_ALLOW_FILE_SKILL_SOURCE=1 to enable in tests"
         )
     raise ValueError("source_url must be an https:// git URL")
 
 
-_KNOWN_HOSTS = os.path.join(tempfile.gettempdir(), "agenhood-skills-known-hosts")
+_KNOWN_HOSTS = os.path.join(tempfile.gettempdir(), "agentdock-skills-known-hosts")
 
 
 @contextmanager

@@ -1,0 +1,75 @@
+name: AgentDock Nanobot
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main, feat/nanobot-integration]
+
+permissions:
+  contents: read
+
+jobs:
+  adapter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e 'packages/agentcore[dev]' -e 'services/shim[dev]' -e 'services/control_plane[dev]'
+      - run: mypy packages/agentcore/agentcore
+      - name: Driver and protocol contracts
+        run: |
+          PYTHONPATH=packages/agentcore pytest -q packages/agentcore/tests/drivers/test_nanobot.py packages/agentcore/tests/drivers/conformance/test_meta.py
+          PYTHONPATH=packages/agentcore pytest -q packages/agentcore/tests/drivers/conformance/test_conformance.py -k nanobot
+      - name: Control plane routing and model policy
+        run: |
+          PYTHONPATH=services/control_plane:services/control_plane/tests pytest -q services/control_plane/tests/test_nanobot_ws.py services/control_plane/tests/test_model_catalog.py services/control_plane/tests/test_tenant_defaults.py
+      - name: Shim driver registration
+        run: PYTHONPATH=services/shim pytest -q services/shim/tests/test_main_drivers.py
+
+  console:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/console/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npx vitest run src/components/ChatTimeline.test.tsx src/components/EventFeed.test.tsx src/lib/drivers.test.ts
+      - run: npm run build
+
+  gateway-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the actual runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/agent/Dockerfile
+          load: true
+          tags: agentdock-agent:test
+          build-args: VARIANT=slim
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Real gateway streaming and restart persistence with privilege drop
+        run: |
+          docker run --rm --user root \
+            -e AGENTDOCK_TEST_NANOBOT=1 \
+            -v "$PWD/packages/agentcore/tests/drivers/test_nanobot_live.py:/tests/test_nanobot_live.py:ro" \
+            --entrypoint /bin/bash agentdock-agent:test -ec '
+              /opt/venv/bin/python -m ensurepip
+              /opt/venv/bin/python -m pip install pytest pytest-asyncio
+              /opt/venv/bin/python -m pytest -q -o asyncio_mode=auto /tests/test_nanobot_live.py
+            '

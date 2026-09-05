@@ -13,6 +13,7 @@ import pytest
 from agentcore.drivers.api import ApiDriver
 from agentcore.drivers.claude_code import ClaudeCodeDriver
 from agentcore.drivers.codex import CodexDriver
+from agentcore.drivers.nanobot import NanobotDriver
 from agentcore.drivers.opencode import OpencodeDriver
 from agentcore.drivers.vanilla import VanillaDriver
 from agentcore.llm.base import LLMResponse
@@ -41,6 +42,7 @@ ALL_DRIVERS: list[DriverEntry] = [
     DriverEntry("opencode", OpencodeDriver(), subprocess=True),
     DriverEntry("codex", CodexDriver(), subprocess=True),
     DriverEntry("claude-code", ClaudeCodeDriver(), subprocess=True),
+    DriverEntry("nanobot", NanobotDriver(), subprocess=True),
 ]
 
 
@@ -162,6 +164,8 @@ def _events_for(
     "missing_binary"); corpus filenames map via ``_case_file`` (success →
     success_with_usage).
     """
+    if entry.name == "nanobot":
+        return _nanobot_events_for(case)
     events, emit = collector()
     ws = tempfile.mkdtemp()
     cfg = AgentConfig(driver=entry.name, model="m-test")
@@ -235,3 +239,29 @@ def _events_for(
 
     asyncio.run(_run())
     return events, ws
+
+
+def _nanobot_events_for(case: str) -> tuple[list, str]:
+    """Exercise the adapter through a local protocol peer, including cleanup."""
+    from unittest.mock import AsyncMock
+
+    from agentcore.drivers.nanobot import NanobotError
+    from tests.drivers.test_nanobot import Peer, invoke, run_peer
+
+    workspace = Path(tempfile.mkdtemp())
+    mode = {"success": "simple", "error": "error", "timeout": "wait", "cancel": "wait"}.get(
+        case, "normal"
+    )
+    peer = Peer(mode)
+
+    async def check(driver, runtime):
+        if case == "missing_binary":
+            runtime.ensure_started = AsyncMock(side_effect=NanobotError("nanobot_unavailable"))
+        cancel = asyncio.Event()
+        if case == "cancel":
+            cancel.set()
+        limits = _LIMITS.model_copy(update={"timeout_seconds": 0 if case == "timeout" else 3})
+        _, events = await invoke(driver, workspace, cancel=cancel, limits=limits, credential=CRED)
+        return events
+
+    return asyncio.run(run_peer(workspace, peer, check)), str(workspace)

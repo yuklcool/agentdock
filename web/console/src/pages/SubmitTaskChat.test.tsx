@@ -62,7 +62,7 @@ describe("SubmitTask chat layout", () => {
 
     // Toggle to chat
     await userEvent.click(await screen.findByRole("button", { name: /chat/i }));
-    expect(localStorage.getItem("agenhood.submitLayout")).toBe("chat");
+    expect(localStorage.getItem("agentdock.submitLayout")).toBe("chat");
 
     // Send a prompt (target the composer textarea by its exact label — the
     // "Use a saved prompt" button also matches a loose /Prompt/i).

@@ -1,13 +1,13 @@
 <div align="center">
 
-# Agenhood
+# AgentDock
 
-### Self-hosted infrastructure for a fleet of sandboxed, long-lived AI agents
+### 自托管的多实例 Nanobot 与 AI 智能体管理平台
 
-Provision autonomous AI agents once, then task, schedule, and chain them — each in its own hardened Docker container with a persistent workspace, internet access, and a pluggable "brain." Watch every action stream live from a polished web console or a clean REST API. **You own the agents, the data, and the stack.**
+AgentDock 为独立运行的 Nanobot 提供容器管理、持久工作空间、流式对话、MCP/Skill 分配和统一访问入口。每个实例运行在独立 Docker 容器中，也保留 Codex、OpenCode 等其他执行引擎。你可以通过管理后台、REST/SSE 或 WebSocket 接入自己的前端。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/appssemble/agenhood/actions/workflows/ci.yml/badge.svg)](https://github.com/appssemble/agenhood/actions/workflows/ci.yml)
+[![CI](https://github.com/yuklcool/agentdock/actions/workflows/nanobot.yml/badge.svg)](https://github.com/yuklcool/agentdock/actions/workflows/nanobot.yml)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18-61DAFB.svg?logo=react&logoColor=black)](https://react.dev/)
@@ -17,16 +17,31 @@ Provision autonomous AI agents once, then task, schedule, and chain them — eac
 </div>
 
 <!-- Add a hero screenshot or GIF of the live task viewer / fleet grid here:
-<p align="center"><img src="docs/assets/hero.png" alt="Agenhood Fleet Console — live agent task viewer" width="820"></p>
+<p align="center"><img src="docs/assets/hero.png" alt="AgentDock Fleet Console — live agent task viewer" width="820"></p>
 -->
 
 ---
 
-## Why Agenhood?
+## Nanobot 快速入口
+
+先阅读 [AgentDock Nanobot 集成指南](docs/NANOBOT.md)，了解部署步骤、会话持久化、
+`/v1/ws` 消息协议、MCP/Skill 配置和当前版本边界。
+
+```bash
+git clone https://github.com/yuklcool/agentdock.git
+cd agentdock
+make dev
+```
+
+在管理后台添加 OpenAI/Anthropic API key，创建 Agent 时选择 **Nanobot**。
+多个实例相互独立；同一个实例目前一次执行一个任务，多个会话分别保存历史。
+访问控制沿用工作空间/租户边界：同一工作空间成员共享资源，个人隔离使用独立工作空间。
+
+## Why AgentDock?
 
 Chat assistants forget. Agent CLIs are throwaway. Neither runs unattended on infrastructure you control.
 
-Agenhood sits between **chat assistants** (ChatGPT, Claude) and **dev-agent CLIs** (Codex, opencode, Claude Code) and gives them an operational home: a persistent, multi-tenant, observable **fleet** of AI agents that live on **your** server.
+AgentDock sits between **chat assistants** (ChatGPT, Claude) and **dev-agent CLIs** (Codex, opencode, Claude Code) and gives them an operational home: a persistent, multi-tenant, observable **fleet** of AI agents that live on **your** server.
 
 - **Long-lived, not ephemeral** — agents keep a writable workspace volume across restarts, pauses, and weeks of idle. Files, memory, and history persist.
 - **Sandboxed by default** — every agent runs in its own hardened container: read-only root filesystem, dropped Linux capabilities, egress filtering (private ranges & cloud-metadata endpoints blocked), and CPU/memory limits. An unhinged agent can't harm the host or your other agents.
@@ -42,7 +57,7 @@ Agenhood sits between **chat assistants** (ChatGPT, Claude) and **dev-agent CLIs
 - [Tech stack](#tech-stack)
 - [Quick start](#quick-start)
 - [Using the API](#using-the-api)
-- [Running Agenhood: development vs production](#running-agenhood-development-vs-production)
+- [Running AgentDock: development vs production](#running-agentdock-development-vs-production)
 - [Working on the code](#working-on-the-code)
 - [Project layout](#project-layout)
 - [Contributing](#contributing)
@@ -59,6 +74,7 @@ One identical API, multiple execution engines, hot-swappable per agent via a dri
 
 | Driver | What it is |
 | --- | --- |
+| **Nanobot** | Independent official Nanobot gateway: persistent conversations, streaming output, assigned MCP servers and skills, managed by AgentDock. |
 | **Vanilla** | A built-in tool-use loop you fully control — pick the tools, write the system prompt, tune iteration/token budgets. |
 | **Opencode** | An embedded coding harness that manages its own tools and context. |
 | **Codex** | OpenAI's Codex agent, with skill support. |
@@ -90,7 +106,7 @@ A usage dashboard (tokens, tasks, success rate, trends), an **in-browser termina
 
 ## Architecture
 
-Agenhood is a small monorepo of independently-deployable services around a shared core library. Agents are **runtime-provisioned Docker containers**, not compose services — the control plane creates and drives them on demand.
+AgentDock is a small monorepo of independently-deployable services around a shared core library. Agents are **runtime-provisioned Docker containers**, not compose services — the control plane creates and drives them on demand.
 
 ```mermaid
 flowchart TB
@@ -130,12 +146,12 @@ flowchart TB
 **Prerequisites:** Docker (with the daemon running) and Python 3.12+.
 
 ```bash
-git clone https://github.com/appssemble/agenhood.git
-cd agenhood
+git clone https://github.com/yuklcool/agentdock.git
+cd agentdock
 make dev
 ```
 
-`make dev` is turnkey: it builds the agent image, starts the stack in **development mode** (hot reload, insecure local defaults — nothing to configure), runs migrations, seeds a tenant, creates a login, and prints the URL. For a real deployment, see [Running Agenhood: development vs production](#running-agenhood-development-vs-production).
+`make dev` is turnkey: it builds the agent image, starts the stack in **development mode** (hot reload, insecure local defaults — nothing to configure), runs migrations, seeds a tenant, creates a login, and prints the URL. For a real deployment, see [Running AgentDock: development vs production](#running-agentdock-development-vs-production).
 
 ```
 Console:  http://localhost:5173
@@ -166,7 +182,7 @@ curl -N http://localhost:5173/v1/containers/$AGENT_ID/tasks/$TASK_ID/events \
   -H "Authorization: Bearer tk_live_seedkey"
 ```
 
-## Running Agenhood: development vs production
+## Running AgentDock: development vs production
 
 Both modes are driven by a single `make` command that wraps Docker Compose. They differ in the env file they load, the service topology they bring up, and how you reach the console. **Both auto-build the agent image on first run and apply database migrations for you.**
 
@@ -209,13 +225,13 @@ make smoke                              # 4. optional: health & egress smoke che
 `make prod` refuses to start if `deploy/.env` is missing or still contains any `change-me` placeholder. Point your domain's DNS at the VM and open ports **80/443** so Traefik can obtain certificates; the console is then served at `https://$PUBLIC_HOST` with the API on the same origin under `/v1`. Stop with `make prod-stop` — data is preserved in the `pgdata` volume.
 
 > [!IMPORTANT]
-> Agenhood was built for a trusted, self-hosted deployment. Review the sandbox, egress, and credential settings against your own threat model before exposing it publicly. Accounts are provisioned by admins/staff — there is no public self-signup.
+> AgentDock was built for a trusted, self-hosted deployment. Review the sandbox, egress, and credential settings against your own threat model before exposing it publicly. Accounts are provisioned by admins/staff — there is no public self-signup.
 
 **More deploy detail:** compose topology and verification steps in [`deploy/README.md`](deploy/README.md), a managed [Coolify](https://coolify.io) path in [`deploy/COOLIFY.md`](deploy/COOLIFY.md), and VM sizing in [`deploy/SIZING.md`](deploy/SIZING.md). The agent image ships in **two variants** — `full` (headless Chromium for JS-rendered web fetch) and `slim`.
 
 ## Working on the code
 
-Setup for contributing to Agenhood itself — linters, type checks, and tests. This is separate from *running* the app (above); you only need it when editing the source.
+Setup for contributing to AgentDock itself — linters, type checks, and tests. This is separate from *running* the app (above); you only need it when editing the source.
 
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate

@@ -33,7 +33,7 @@ export type TaskStatus = "pending" | "running" | "completed" | "failed" | "cance
 export interface TaskResult { success: boolean; output?: unknown; reason?: string | null; }
 
 export type EventType =
-  | "task_started" | "iteration_started" | "assistant_message" | "tool_call"
+  | "task_started" | "iteration_started" | "assistant_message" | "assistant_delta" | "reasoning_delta" | "reasoning_end" | "stream_end" | "tool_call"
   | "tool_result" | "token_update" | "file_changed" | "git" | "opencode_stdout"
   | "opencode_event" | "codex_stdout" | "codex_event" | "claude_stdout" | "claude_event" | "status_change" | "log";
 export interface Event { seq: number; type: EventType; ts: string; payload: Record<string, unknown>; }

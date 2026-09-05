@@ -18,7 +18,7 @@ _DEFAULTS: dict = {  # type: ignore[type-arg]
     "idle_pause_minutes": 20,
     "archive_after_hours": 72,
     "reclaim_after_days": 30,
-    "allowed_drivers": ["vanilla", "opencode", "codex", "claude-code", "api"],
+    "allowed_drivers": ["vanilla", "opencode", "codex", "claude-code", "api", "nanobot"],
 }
 
 
@@ -61,6 +61,8 @@ def worker_cap_for_driver(limits: dict, driver: str) -> int:  # type: ignore[typ
     The api driver runs single-call tasks with no subprocesses or workspace
     writes, so it gets its own (much higher) default cap.
     """
+    if driver == "nanobot":
+        return 1
     if driver == "api":
         return int(limits.get("api_driver_max_workers", 32))
     return int(limits.get("max_concurrent_tasks_per_container", 4))

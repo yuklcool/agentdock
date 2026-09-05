@@ -16,10 +16,10 @@ _HEADERS = {"Authorization": "Bearer tk_live_seedkey"}
 # ::test_validate_rejects_non_https). The stub server runs plain HTTP on the
 # internal Docker test network (no TLS termination available there), so this
 # opts in via the same env-var pattern skills_fetch.py uses for
-# AGENHOOD_ALLOW_FILE_SKILL_SOURCE.
+# AGENTDOCK_ALLOW_FILE_SKILL_SOURCE.
 @pytest.fixture(autouse=True)
 def _allow_http_mcp_source(monkeypatch):
-    monkeypatch.setenv("AGENHOOD_ALLOW_HTTP_MCP_SOURCE", "1")
+    monkeypatch.setenv("AGENTDOCK_ALLOW_HTTP_MCP_SOURCE", "1")
 
 
 async def _seed_admin_session(app, tenant_id: str) -> str:

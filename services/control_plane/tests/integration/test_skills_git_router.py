@@ -22,7 +22,7 @@ _ADMIN_HEADERS = {"Authorization": "Bearer boot-test-key"}
 # disallows file:// — integration tests opt-in via this autouse fixture).
 @pytest.fixture(autouse=True)
 def _allow_file_sources(monkeypatch):
-    monkeypatch.setenv("AGENHOOD_ALLOW_FILE_SKILL_SOURCE", "1")
+    monkeypatch.setenv("AGENTDOCK_ALLOW_FILE_SKILL_SOURCE", "1")
 
 
 # ---------------------------------------------------------------------------

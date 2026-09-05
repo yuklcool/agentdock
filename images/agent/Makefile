@@ -1,5 +1,5 @@
 # images/agent/Makefile
-VERSION  ?= 1.0.0
+VERSION  ?= 0.1.0-nanobot
 REGISTRY ?=
 IMAGE    := $(REGISTRY)agent-runtime
 # Build context is the monorepo root (two levels up from this Makefile).

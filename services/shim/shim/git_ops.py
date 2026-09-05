@@ -24,8 +24,8 @@ COMMIT_TIMEOUT = 60.0
 PUSH_TIMEOUT = 120.0
 VERIFY_TIMEOUT = 30.0
 
-_COMMITTER_NAME = "Agenhood"
-_COMMITTER_EMAIL = "agent@agenhood"
+_COMMITTER_NAME = "AgentDock"
+_COMMITTER_EMAIL = "agent@agentdock"
 
 _TASK_RE = re.compile(r"^task (\S+): ")
 _STAT_RE = re.compile(r"(\d+) files? changed")
