@@ -216,3 +216,13 @@ GitHub 的 `AgentDock Nanobot` 工作流还会构建实际 Agent 镜像，在 Do
 当前执行环境没有 Docker，三实例并发、生产容器重建及部署验收仍需在 Docker 主机完成。
 原项目的完整测试套件另有既存的收集路径、界面断言及沙箱环境问题；新增工作流单独覆盖本集成，
 保留原来的手动全量 CI，未跳过或修改其断言。
+
+
+### Docker 验证记录
+
+2026-09-05，代码提交 `fe5071072698bc38e4b252e7122bccf3dd858102` 的
+[GitHub Actions 检查](https://github.com/yuklcool/agentdock/actions/runs/33950259301) 全部通过：
+后端适配与路由、前端类型/渲染/构建，以及真实 Agent 镜像构建。
+镜像内联调在 root Shim → agent uid 的实际权限边界下运行，验证了流式回答、网关重启后的
+历史恢复和子进程 uid（1 项联调通过）。该镜像检查使用 `VARIANT=slim`。
+此结果不替代上面的三实例并发和生产部署验收。
