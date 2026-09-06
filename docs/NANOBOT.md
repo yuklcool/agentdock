@@ -6,7 +6,8 @@ AgentDock 是可自行部署的智能体容器管理平台。本版本把官方
 
 ## 已接入的功能
 
-- 管理后台选择 `Nanobot` 驱动，创建多个独立实例。
+- 管理后台选择 `Nanobot` 驱动，创建多个独立实例；按用户/模板自动创建私有实例。
+- 个人 API Key、实例访问隔离、每日准入配额、审计、监控及加密备份恢复。
 - 复用平台的启动、暂停、恢复、归档、资源限制和持久工作空间。
 - 平台 Task API / SSE 与统一 `/v1/ws` WebSocket 入口。
 - 按实例、按平台 `session_id` 保存 Nanobot `chat_id` 映射。
@@ -32,7 +33,7 @@ GitHub 和 Python 包仓库。首次构建需要下载依赖；运行时不会�
 
 1. 打开 `http://localhost:5173`，使用启动命令输出的管理员账号登录并修改密码。
 2. 进入工作空间，在 **Settings → Credentials** 添加 OpenAI 或 Anthropic API key。
-3. 新建 Agent，选择 **Nanobot** 驱动及可用模型，设置实例名称、CPU 和内存上限。
+3. 新建 Agent，选择 **Nanobot** 驱动及可用模型，设置实例名称。资源上限由管理员管理。
 4. 如需使用额外能力，在实例配置中选择 MCP 和 Skills。
 5. 在该实例的对话页面发送任务；第一次任务会启动容器内的 Nanobot Gateway。
 6. 重复创建多个实例。每个实例拥有独立容器和 Volume，内部可以使用相同的 8765 端口。
@@ -80,11 +81,12 @@ Nanobot 子进程，再执行新任务；不会在其他实例中重启进程。
 
 ## REST 与 SSE
 
-现有接口不变。创建实例后，`agent_id` 即平台返回的容器/实例 id：
+创建实例后，`agent_id` 即平台返回的容器/实例 id。私有实例使用所属用户的个人 API key
+或登录会话；工作空间 API key 仅能访问共享实例：
 
 ```http
 POST /v1/containers/{agent_id}/tasks
-Authorization: Bearer <工作空间 API key>
+Authorization: Bearer <个人 API key>
 Content-Type: application/json
 
 {"prompt":"分析昨晚报警","session_id":"lighting-session-001"}
@@ -95,7 +97,7 @@ Content-Type: application/json
 ```http
 GET /v1/containers/{agent_id}/tasks/{task_id}/events
 Accept: text/event-stream
-Authorization: Bearer <工作空间 API key>
+Authorization: Bearer <个人 API key>
 ```
 
 后续消息使用相同 `session_id` 继续会话；新会话使用新 id。省略 session_id 表示独立一次性任务。
@@ -232,3 +234,21 @@ GitHub Actions 结果为准。生产上线仍需使用自己的模型凭据、�
 镜像内联调在 root Shim → agent uid 的实际权限边界下运行，验证了流式回答、网关重启后的
 历史恢复和子进程 uid（1 项联调通过）。该镜像检查使用 `VARIANT=slim`。
 此结果不替代上面的三实例并发和生产部署验收。
+
+
+### 多实例与生产治理验证记录
+
+2026-09-06，提交 `68f9bef8f7cbaf303a4fc52dd63e6d36560a52ad` 的
+[Docker、PostgreSQL 与备份验收](https://github.com/yuklcool/agentdock/actions/runs/34030283922)
+中，`gateway-image`、`governance-database`、`backup-restore` 三项作业通过：
+
+- 三个真实 Nanobot 容器并发，各自独立 Volume；跨实例与跨 session 历史隔离。
+- Docker 暂停/恢复、网关重启、删除运行容器后挂载原 Volume 继续会话。
+- 完整数据库迁移、用户与自动化访问隔离、并发预算和运行容量预留、模板重复打开及删除后重建。
+- PostgreSQL 与 Volume 经 age 加密后恢复至干净环境，文件内容、UID/GID 与权限一致。
+
+该记录仅表示上述作业通过；同次全量 CI 暴露的旧测试异步调用与前端测试类型问题已在后续提交修复，
+并补充带认证 MCP 工具注册/撤销的真实网关验收。最新完整检查以
+[本次改造 PR 的检查结果](https://github.com/yuklcool/agentdock/pull/2/checks) 为准。
+生产部署仍须执行迁移，配置自己的模型凭据、域名、告警接收地址与备份密钥，
+并按实际数据规模进行压测和恢复演练。

@@ -35,7 +35,9 @@ make dev
 
 在管理后台添加 OpenAI/Anthropic API key，创建 Agent 时选择 **Nanobot**。
 多个实例相互独立；同一个实例目前一次执行一个任务，多个会话分别保存历史。
-访问控制沿用工作空间/租户边界：同一工作空间成员共享资源，个人隔离使用独立工作空间。
+支持同一工作空间内的用户私有实例及共享实例。普通成员仅访问自己的私有实例和共享实例；
+管理员可管理本工作空间全部实例。模板页“打开我的智能体”可为每位用户自动创建独立实例，
+个人 API Key、配额、审计和备份恢复见 [运维指南](deploy/OPERATIONS.md)。
 
 ## Why AgentDock?
 
@@ -44,9 +46,9 @@ Chat assistants forget. Agent CLIs are throwaway. Neither runs unattended on inf
 AgentDock sits between **chat assistants** (ChatGPT, Claude) and **dev-agent CLIs** (Codex, opencode, Claude Code) and gives them an operational home: a persistent, multi-tenant, observable **fleet** of AI agents that live on **your** server.
 
 - **Long-lived, not ephemeral** — agents keep a writable workspace volume across restarts, pauses, and weeks of idle. Files, memory, and history persist.
-- **Sandboxed by default** — every agent runs in its own hardened container: read-only root filesystem, dropped Linux capabilities, egress filtering (private ranges & cloud-metadata endpoints blocked), and CPU/memory limits. An unhinged agent can't harm the host or your other agents.
+- **Sandboxed by default** — every agent runs in its own hardened container: read-only root filesystem, dropped Linux capabilities, egress filtering (private ranges & cloud-metadata endpoints blocked), and CPU/memory limits. Container boundaries and per-user authorization limit access; operators maintain host and network security.
 - **Pluggable brains (drivers)** — one identical API, swappable execution engines. Pick the right brain per agent.
-- **Self-hosted & yours** — single-VM deploy, your keys, your data. No vendor lock-in, no per-seat SaaS tax, no data leaving your stack.
+- **Self-hosted & yours** — single-VM deploy, your keys, your data. No per-seat platform fee; you choose model providers and control their credentials. Model requests are sent to the provider you configure.
 - **Built for humans *and* machines** — everything in the console is a first-class REST API + Server-Sent-Events stream. The console is just one client of that API.
 - **General-purpose** — research, drafting, web automation, document production, data work — not just code diffs.
 
