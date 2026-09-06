@@ -12,7 +12,7 @@ test("saves validated policy fields and renders audit history", async () => {
   server.use(
     http.get("/v1/operations/policy", () => HttpResponse.json(policy)),
     http.get("/v1/operations/audit", () => HttpResponse.json({ events: [{ id: 1, ts: "2026-09-06T00:00:00Z", action: "personal_agent.created", actor_id: "alice", target_id: "instance" }] })),
-    http.put("/v1/operations/policy", async ({ request }) => { saved = await request.json(); return HttpResponse.json(saved); }),
+    http.put("/v1/operations/policy", async ({ request }) => { saved = await request.json(); return HttpResponse.json({ ...policy, user_daily_task_limit: 20 }); }),
   );
   renderWithProviders(<Operations />);
   const field = await screen.findByLabelText("每人每日任务数");

@@ -255,12 +255,14 @@ async def test_auto_push_when_git_push_block_present(tmp_path):
                 raise AssertionError("push git-event not emitted within 15 s")
             await asyncio.sleep(0.05)
         ws_head = (await c.get("/git/status")).json()["head"]
-        remote_head = await asyncio.to_thread(
-            subprocess.run,
-            ["git", "-C", str(bare), "rev-parse", "main"],
-            capture_output=True,
-            text=True,
-            check=True,
+        remote_head = (
+            await asyncio.to_thread(
+                subprocess.run,
+                ["git", "-C", str(bare), "rev-parse", "main"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
         ).stdout.strip()
         assert remote_head == ws_head
 

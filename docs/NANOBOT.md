@@ -161,6 +161,13 @@ MCP 使用平台现有远程服务器定义：无认证、Bearer 或自定义请
 Nanobot `tools.mcpServers`，工具只由 Nanobot 执行一次。私有数据库或内网 MCP 的网络访问
 仍需管理员配置受控通路；默认容器出网策略不会因此关闭。
 
+官方 Nanobot 默认拒绝 MCP 访问私有和回环 IP。确需访问内网服务时，管理员可在部署环境设置
+`AGENTDOCK_NANOBOT_SSRF_WHITELIST`，使用空格分隔 CIDR，优先精确服务器 IP
+（如 `10.0.0.7/32` 或 IPv6 `/128`）。此设置会传入新建/重建实例的 Shim；
+在控制台实例环境变量中填写同名项不能放宽策略。它使用 Nanobot 原生白名单，
+会作用于这些 IP 的所有原生网络工具，不仅是 MCP；还需配合 Docker 出网代理规则。
+默认空值保留官方防护。修改后重建实例以应用部署配置。
+
 Skills 使用平台已经解析的文本或 Git bundle。更新时只替换本适配器此前管理的目录，取消选择后删除
 对应目录；不会清空用户自己建立的其他 Skills。同名用户目录和符号链接会产生冲突错误，需要管理员处理。
 平台分配不会禁用 Nanobot 的所有内置技能，Skill 列表不构成数据访问权限边界。
@@ -208,7 +215,8 @@ PYTHONPATH=services/shim pytest services/shim/tests -m unit -q
 AGENTDOCK_TEST_NANOBOT=1 pytest -q packages/agentcore/tests/drivers/test_nanobot_live.py
 ```
 
-测试使用本地确定性模型端点，验证流式回答及网关重启后历史进入下一轮模型请求。
+测试使用本地确定性模型和 MCP 端点，验证流式回答、MCP 鉴权与工具注册/撤销、
+技能撤销及网关重启后的历史恢复。仅测试进程为本地 MCP 配置 `127.0.0.1/32` 白名单。
 GitHub 的 `AgentDock Nanobot` 工作流还会构建实际 Agent 镜像，在 Docker 内验证子进程降权。
 本地受限用户命名空间若不能切换 uid，可仅在测试时设置 `AGENTDOCK_TEST_LOCAL_UID=1`；
 该模式不验证容器权限边界，不应作为 Docker 验收替代。

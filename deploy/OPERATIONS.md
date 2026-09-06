@@ -66,6 +66,6 @@ CI 使用 `python scripts/test_backup.py` 在一次性 PostgreSQL 与 Volume 上
 python scripts/test_nanobot_instances.py --image agentdock-agent:test
 ```
 
-三个真实 Docker 容器同时运行固定版本 Nanobot，各用独立 Volume，验证会话隔离、技能撤销、Docker 暂停/恢复、网关重启和删除运行容器后的同卷恢复。测试使用本地确定性模型端点，无需真实付费 API Key。单实例串行执行符合 Nanobot 会话与工作区写入语义；扩容通过增加实例实现。
+三个真实 Docker 容器同时运行固定版本 Nanobot，各用独立 Volume，验证会话隔离、MCP 鉴权及工具撤销、技能撤销、Docker 暂停/恢复、网关重启和删除运行容器后的同卷恢复。测试使用本地确定性模型端点，无需真实付费 API Key。单实例串行执行符合 Nanobot 会话与工作区写入语义；扩容通过增加实例实现。
 
 PostgreSQL 集成测试使用 `AGENTDOCK_TEST_DATABASE_URL` 指向一次性数据库，先运行完整迁移，再执行 `services/control_plane/tests/test_private_instances.py`。自动 CI 还执行全量后端单元测试、前端测试、类型检查、Lint 和构建。较广的旧服务集成套件保留在 CI 手动运行入口。

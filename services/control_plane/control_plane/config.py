@@ -17,6 +17,9 @@ def _parse_kv(raw: str) -> dict[str, str]:
 
 def _agent_extra_env_from_environ() -> dict[str, str]:
     extra = _parse_kv(os.environ.get("AGENT_EXTRA_ENV", ""))
+    whitelist = os.environ.get("AGENTDOCK_NANOBOT_SSRF_WHITELIST", "").strip()
+    if whitelist:
+        extra.setdefault("AGENTDOCK_NANOBOT_SSRF_WHITELIST", whitelist)
     exa_key = (os.environ.get("EXA_API_KEY") or "").strip()
     if exa_key:
         # Deployment-wide Exa key for the agents' web_search/web_read tools.

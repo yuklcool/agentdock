@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import json
+import os
 import re
 import secrets
 import shutil
@@ -75,6 +77,15 @@ def runtime_config(
         elif server.auth_type != "none":
             raise NanobotError("nanobot_invalid_mcp_auth")
         mcp[server.name] = {"url": server.url, "headers": headers}
+    # Only deployment-owned Shim environment may relax native SSRF protection.
+    # Never read this policy from the user-editable task/instance `env` mapping.
+    try:
+        whitelist = [
+            str(ipaddress.ip_network(cidr))
+            for cidr in os.environ.get("AGENTDOCK_NANOBOT_SSRF_WHITELIST", "").split()
+        ]
+    except ValueError:
+        raise NanobotError("nanobot_invalid_ssrf_whitelist") from None
     return {
         "agents": {
             "defaults": {
@@ -100,7 +111,11 @@ def runtime_config(
             }
         },
         "gateway": {"heartbeat": {"enabled": False}, "restartMode": "exit"},
-        "tools": {"mcpServers": mcp, "restrictToWorkspace": True},
+        "tools": {
+            "mcpServers": mcp,
+            "restrictToWorkspace": True,
+            "ssrfWhitelist": whitelist,
+        },
     }
 
 
