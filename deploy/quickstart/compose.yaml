@@ -1,0 +1,116 @@
+name: agentdock
+
+# Standalone distribution: no source checkout, build directives or config mounts.
+x-image: &image-settings
+  platform: linux/amd64
+  restart: unless-stopped
+
+services:
+  postgres:
+    <<: *image-settings
+    image: ${AGENTDOCK_REGISTRY:-ghcr.io/yuklcool/agentdock}/postgres:${AGENTDOCK_VERSION:-0.3.0}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Run configure.py first}
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  egress-proxy:
+    <<: *image-settings
+    image: ${AGENTDOCK_REGISTRY:-ghcr.io/yuklcool/agentdock}/egress-proxy:${AGENTDOCK_VERSION:-0.3.0}
+    environment:
+      EGRESS_DENYLIST: ${EGRESS_DENYLIST:-}
+      EGRESS_UPSTREAM_PROXY: ${EGRESS_UPSTREAM_PROXY:-}
+    networks: [agent-runtime-internal, agent-runtime-egress]
+
+  searxng:
+    <<: *image-settings
+    image: ${AGENTDOCK_REGISTRY:-ghcr.io/yuklcool/agentdock}/searxng:${AGENTDOCK_VERSION:-0.3.0}
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?Run configure.py first}
+    networks: [agent-runtime-internal, agent-runtime-egress]
+
+  control-plane:
+    <<: *image-settings
+    image: ${AGENTDOCK_REGISTRY:-ghcr.io/yuklcool/agentdock}/control-plane:${AGENTDOCK_VERSION:-0.3.0}
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Run configure.py first}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?Run configure.py first}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?Run configure.py first}
+      SEED_STAFF_EMAIL: ${SEED_STAFF_EMAIL:?Run configure.py first}
+      SEED_STAFF_PASSWORD: ${SEED_STAFF_PASSWORD:-}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      AGENT_REGISTRY: ${AGENTDOCK_REGISTRY:-ghcr.io/yuklcool/agentdock}
+      AGENT_IMAGE_TAG: ${AGENTDOCK_VERSION:-0.3.0}
+      AGENT_IMAGE_PULL_POLICY: if-not-present
+      AGENT_REGISTRY_USERNAME: ${AGENT_REGISTRY_USERNAME:-}
+      AGENT_REGISTRY_PASSWORD: ${AGENT_REGISTRY_PASSWORD:-}
+      AGENTDOCK_NANOBOT_SSRF_WHITELIST: ${AGENTDOCK_NANOBOT_SSRF_WHITELIST:-}
+      EXA_API_KEY: ${EXA_API_KEY:-}
+    networks: [default, agent-runtime-internal]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8443/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  connectors:
+    <<: *image-settings
+    image: ${AGENTDOCK_REGISTRY:-ghcr.io/yuklcool/agentdock}/connectors:${AGENTDOCK_VERSION:-0.3.0}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Run configure.py first}
+      CONNECTORS_MASTER_KEY: ${CONNECTORS_MASTER_KEY:?Run configure.py first}
+      CONTROL_PLANE_BASE_URL: http://control-plane:8443
+      CONNECTORS_PUBLIC_BASE_URL: ${PUBLIC_URL:-http://localhost:8080}/v1
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+    depends_on:
+      postgres: {condition: service_healthy}
+      control-plane: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8090/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  web-console:
+    <<: *image-settings
+    image: ${AGENTDOCK_REGISTRY:-ghcr.io/yuklcool/agentdock}/web-console:${AGENTDOCK_VERSION:-0.3.0}
+
+  reverse-proxy:
+    <<: *image-settings
+    image: ${AGENTDOCK_REGISTRY:-ghcr.io/yuklcool/agentdock}/reverse-proxy:${AGENTDOCK_VERSION:-0.3.0}
+    ports: ["${AGENTDOCK_BIND:-127.0.0.1}:${AGENTDOCK_PORT:-8080}:80"]
+    depends_on:
+      control-plane: {condition: service_healthy}
+      connectors: {condition: service_healthy}
+      web-console: {condition: service_started}
+
+  # Pull with --profile images; runtime instances are created by the control plane.
+  agent-runtime:
+    image: ${AGENTDOCK_REGISTRY:-ghcr.io/yuklcool/agentdock}/agent-runtime:${AGENTDOCK_VERSION:-0.3.0}
+    platform: linux/amd64
+    profiles: [images]
+    entrypoint: ["/bin/true"]
+
+networks:
+  agent-runtime-internal:
+    name: agent-runtime-internal
+    internal: true
+  agent-runtime-egress:
+    name: agent-runtime-egress
+
+volumes:
+  pgdata: {}

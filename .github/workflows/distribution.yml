@@ -1,0 +1,159 @@
+name: Publish AgentDock distribution
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, feat/published-deployment]
+    paths:
+      - '.github/workflows/distribution.yml'
+      - 'deploy/quickstart/**'
+      - 'scripts/test_distribution.py'
+
+concurrency:
+  group: agentdock-distribution-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - component: agent-runtime
+            context: .
+            file: images/agent/Dockerfile
+          - component: control-plane
+            context: .
+            file: services/control_plane/Dockerfile
+          - component: web-console
+            context: web/console
+            file: web/console/Dockerfile
+          - component: postgres
+            context: .
+            file: deploy/postgres/Dockerfile
+          - component: connectors
+            context: .
+            file: services/connectors/Dockerfile
+          - component: egress-proxy
+            context: images/egress-proxy
+            file: images/egress-proxy/Dockerfile
+          - component: searxng
+            context: .
+            file: deploy/searxng/Dockerfile
+          - component: reverse-proxy
+            context: .
+            file: deploy/traefik/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish immutable candidate
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ghcr.io/yuklcool/agentdock/${{ matrix.component }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/yuklcool/agentdock
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=distribution-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=distribution-${{ matrix.component }}
+
+  verify:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure and pull without building
+        working-directory: deploy/quickstart
+        run: |
+          python3 configure.py --email acceptance@example.com --version "sha-$GITHUB_SHA" --quiet
+          docker compose --profile images config -q
+          docker compose --profile images pull
+      - name: Start complete distribution
+        working-directory: deploy/quickstart
+        run: docker compose up -d --no-build --wait --wait-timeout 240
+      - name: Verify web login and real instance provisioning
+        run: python3 scripts/test_distribution.py
+      - name: Verify full runtime entrypoint
+        run: python3 scripts/test_agent_image.py --image "ghcr.io/yuklcool/agentdock/agent-runtime:sha-$GITHUB_SHA"
+      - name: Check anonymous image access
+        # Record the actual result; a new GHCR package is private by default.
+        # Package visibility is controlled by the account owner in GitHub Settings.
+        run: |
+          mkdir -p "$RUNNER_TEMP/anonymous-docker"
+          if DOCKER_CONFIG="$RUNNER_TEMP/anonymous-docker" docker manifest inspect "ghcr.io/yuklcool/agentdock/control-plane:sha-$GITHUB_SHA" >/dev/null 2>&1; then
+            echo 'Anonymous image pull: available' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Anonymous image pull: unavailable. Use docker login ghcr.io or make the packages public in GitHub package settings.' >> "$GITHUB_STEP_SUMMARY"
+            echo '::notice::Images require registry authentication until the owner enables public package visibility.'
+          fi
+      - name: Diagnostics on failure
+        if: failure()
+        working-directory: deploy/quickstart
+        run: docker compose logs --tail 80
+      - name: Stop disposable stack
+        if: always()
+        working-directory: deploy/quickstart
+        run: docker compose down -v --remove-orphans
+
+  release:
+    if: github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote verified images without rebuilding
+        run: python3 deploy/quickstart/promote.py "$GITHUB_SHA"
+      - name: Publish standalone deployment bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(cat deploy/quickstart/VERSION)
+          tar -czf agentdock-deploy.tar.gz -C deploy/quickstart compose.yaml configure.py README.md VERSION
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to replace its assets.'
+            exit 1
+          fi
+          gh release create "v$version" agentdock-deploy.tar.gz --target "$GITHUB_SHA" --title "AgentDock $version" --notes-file deploy/quickstart/RELEASE.md
