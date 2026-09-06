@@ -67,7 +67,7 @@ async def admit_task(
 
 # spec §4.4/§4.13: live = running + inbound transients (provisioning, resuming).
 # Pausing/archiving/destroying are *leaving* states — not counted toward the live cap.
-LIVE_STATES = ("running", "provisioning", "resuming")
+LIVE_STATES = ("running", "provisioning", "resuming", "recovering")
 
 
 # ---- DB protocol (matches AsyncSession.execute signature) ----------------------

@@ -20,9 +20,7 @@ RECOVERY_BACKOFF = (5, 30, 120)
 
 # ---- DB protocol (matches AsyncSession.execute signature) ----------------------
 class _Executable(Protocol):
-    async def execute(
-        self, statement: Any, params: Any = None
-    ) -> Any: ...  # noqa: E704
+    async def execute(self, statement: Any, params: Any = None) -> Any: ...  # noqa: E704
 
 
 # ---- legal transition table (index §4 states; spec §4.10) ----------------------
@@ -36,18 +34,25 @@ _LEGAL_TRANSITIONS: set[tuple[str, str]] = {
     ("paused", "resuming"),
     ("paused", "archiving"),
     ("resuming", "running"),
-    ("resuming", "paused"),        # reconciler safe-rest (spec §4.11)
+    ("resuming", "paused"),  # reconciler safe-rest (spec §4.11)
     ("archiving", "archived"),
     ("archived", "provisioning"),  # rehydrate (spec §4.13)
-    ("archived", "destroying"),    # reclaim (spec §4.13)
+    ("archived", "destroying"),  # reclaim (spec §4.13)
     ("recovering", "running"),
     ("recovering", "error"),
-    ("error", "provisioning"),     # recover (spec §4.12)
+    ("error", "provisioning"),  # recover (spec §4.12)
     ("destroying", "destroyed"),
 }
 _NON_TERMINAL: set[str] = {
-    "provisioning", "running", "pausing", "paused", "resuming",
-    "archiving", "archived", "recovering", "error",
+    "provisioning",
+    "running",
+    "pausing",
+    "paused",
+    "resuming",
+    "archiving",
+    "archived",
+    "recovering",
+    "error",
 }
 # destroy reaches 'archived' from any live state except 'archived' itself (nothing to
 # archive) and 'archiving' (already in flight). Derived from _NON_TERMINAL so a new
@@ -105,9 +110,7 @@ async def transition(db: _Executable, cid: str, expected: str, new: str) -> bool
     return bool(res.rowcount == 1)
 
 
-async def transition_from_any(
-    db: _Executable, cid: str, expected: set[str], new: str
-) -> bool:
+async def transition_from_any(db: _Executable, cid: str, expected: set[str], new: str) -> bool:
     """CAS that accepts any status in *expected*; returns True iff one row moved."""
     res = await db.execute(
         text(
@@ -148,9 +151,17 @@ async def _load(db: _Executable, cid: str) -> dict[str, Any]:
     if row is None:
         raise APIError(404, "not_found", f"container {cid} not found")
     keys = [
-        "id", "tenant_id", "docker_name", "volume_name",
-        "image_tag", "image_variant", "shim_token", "config", "resources",
-        "mem_limit", "cpus",
+        "id",
+        "tenant_id",
+        "docker_name",
+        "volume_name",
+        "image_tag",
+        "image_variant",
+        "shim_token",
+        "config",
+        "resources",
+        "mem_limit",
+        "cpus",
     ]
     return dict(zip(keys, row, strict=False))
 
@@ -452,9 +463,7 @@ async def recover(
                 except Exception:  # noqa: BLE001
                     pass
                 row = await _load(db, cid)
-                await docker_ctl.stop(
-                    docker_client, row["docker_name"], STOP_GRACE_SECONDS
-                )
+                await docker_ctl.stop(docker_client, row["docker_name"], STOP_GRACE_SECONDS)
                 if not await docker_ctl.exists(docker_client, row["docker_name"]):
                     host_shim_url = await docker_ctl.run_from_volume(
                         docker_client,
@@ -587,6 +596,11 @@ async def ensure_running_slot(
     If at max_running_containers, LRU-pause an idle live container to free a
     slot; if none can be freed (all busy) → 503 running_capacity_exhausted.
     """
+    # Same tenant lock as create: concurrent restore/create sees committed capacity.
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
+        {"scope": "agentdock:containers:" + tenant_id},
+    )
     if await admission.live_count(db, tenant_id) < limit:
         return
     victim = await admission.lru_idle_running(db, tenant_id)
@@ -647,9 +661,7 @@ async def bring_to_running(
                             settings=settings,
                             network=getattr(settings, "internal_network", None),
                             shim_port=getattr(settings, "shim_port", None),
-                            bind_to_host=getattr(
-                                settings, "bind_shim_port_to_host", False
-                            ),
+                            bind_to_host=getattr(settings, "bind_shim_port_to_host", False),
                             extra_env=getattr(settings, "agent_extra_env", None),
                         )
                     # Docker re-assigns ephemeral host ports on every restart;
@@ -737,9 +749,7 @@ async def restore(
     reclaimed/terminal container) raises 409 via bring_to_running."""
     if await current_status(db, cid) == "running":
         return  # already running — nothing to restore, no audit
-    await bring_to_running(
-        db, docker_client, shim, cid, tenant_id, limit=limit, settings=settings
-    )
+    await bring_to_running(db, docker_client, shim, cid, tenant_id, limit=limit, settings=settings)
     await audit(
         db,
         actor_type=actor_type,
@@ -890,8 +900,10 @@ async def update_resources(
         target_type="container",
         target_id=cid,
         details={
-            "mem_limit": mem_limit, "cpus": cpus,
-            "previous_mem_limit": previous_mem_limit, "previous_cpus": previous_cpus,
+            "mem_limit": mem_limit,
+            "cpus": cpus,
+            "previous_mem_limit": previous_mem_limit,
+            "previous_cpus": previous_cpus,
         },
     )
 

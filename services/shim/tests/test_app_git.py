@@ -247,7 +247,7 @@ async def test_auto_push_when_git_push_block_present(tmp_path):
         # after the task goes terminal, and git is measurably slower when
         # HOME=/home/agent (build_child_env) does not exist on the test host.
         # asyncio.sleep(0.2) was a race-prone timing hack; poll instead.
-        await _wait_for_event(c, "tsk_1", "git", timeout=15.0)
+        await _wait_for_event(c, "tsk_1", "git", deadline_seconds=15.0)
         # The first "git" event may be the commit; wait for the push payload too.
         deadline = asyncio.get_running_loop().time() + 15.0
         while '"op": "push"' not in (await c.get("/tasks/tsk_1/events")).text:

@@ -18,7 +18,7 @@ def upgrade() -> None:
             tenant_id TEXT NOT NULL REFERENCES tenants(id),
             user_id TEXT NOT NULL REFERENCES users(id),
             template_id TEXT NOT NULL REFERENCES templates(id),
-            container_id TEXT REFERENCES containers(id),
+            container_id TEXT REFERENCES containers(id) ON DELETE SET NULL,
             lease_id TEXT NOT NULL,
             lease_until TIMESTAMPTZ NOT NULL,
             status TEXT NOT NULL CHECK (status IN ('provisioning', 'ready', 'error')),

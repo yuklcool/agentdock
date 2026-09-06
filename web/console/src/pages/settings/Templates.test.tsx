@@ -61,3 +61,13 @@ describe("Templates", () => {
     expect(screen.queryByRole("link", { name: /New template/i })).not.toBeInTheDocument();
   });
 });
+
+test("opens a personal instance from a Nanobot template", async () => {
+  meAs("member");
+  server.use(http.get("/v1/templates", () => HttpResponse.json({ templates: [{ ...builtin, driver: "nanobot" }] })));
+  let opened = false;
+  server.use(http.post("/v1/templates/tpl_b/my-agent", () => { opened = true; return HttpResponse.json({ container: { id: "mine" }, created: false }); }));
+  renderWithProviders(<AuthProvider><Templates /></AuthProvider>);
+  await userEvent.click(await screen.findByRole("button", { name: "打开我的智能体" }));
+  await waitFor(() => expect(opened).toBe(true));
+});

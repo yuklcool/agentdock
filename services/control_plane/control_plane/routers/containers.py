@@ -419,7 +419,7 @@ async def create_container(
             .select_from(containers)
             .where(
                 containers.c.tenant_id == tid,
-                containers.c.status.in_(("running", "provisioning", "resuming")),
+                containers.c.status.in_(("running", "provisioning", "resuming", "recovering")),
             )
         )
     ).scalar_one()
@@ -1077,6 +1077,14 @@ async def resume_container(
         raise APIError(409, "container_not_runnable", f"cannot resume from '{row.status}'")
     docker_client = _docker(request)
     app_settings = _settings(request)
+    limits = await load_tenant_limits(session, _tid(principal))
+    await lifecycle.ensure_running_slot(
+        session,
+        docker_client,
+        _shim(request),
+        _tid(principal),
+        limit=int(limits["max_running_containers"]),
+    )
     await lifecycle.resume(session, docker_client, cid, settings=app_settings)
     await session.commit()
     return {"id": cid, "status": "running"}
@@ -1124,6 +1132,14 @@ async def recover_container(
     docker_client = _docker(request)
     shim_client = _shim(request)
     app_settings = _settings(request)
+    limits = await load_tenant_limits(session, row.tenant_id)
+    await lifecycle.ensure_running_slot(
+        session,
+        docker_client,
+        shim_client,
+        row.tenant_id,
+        limit=int(limits["max_running_containers"]),
+    )
     await lifecycle.recover(
         session,
         docker_client,

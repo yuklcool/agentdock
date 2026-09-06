@@ -41,8 +41,8 @@ export default function Operations() {
     <p>按 UTC 自然日计算。每日预算填 0 表示不限额；正在执行的任务会预留其 Token 上限。预算控制新任务准入，实际用量以模型返回为准。</p>
     {policy.error && <p role="alert">无法加载配额，请重试。</p>}
     {current && <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
-      {Object.entries(fields).map(([key, label]) => <Field key={key} label={label}>
-        <Input type="number" required min={key === "max_private_containers_per_user" ? 1 : 0}
+      {Object.entries(fields).map(([key, label]) => <Field key={key} label={label} htmlFor={key}>
+        <Input id={key} type="number" required min={key === "max_private_containers_per_user" ? 1 : 0}
           max={key === "max_private_containers_per_user" ? 1000 : key.endsWith("task_limit") ? 1e9 : 1e12}
           step={1} value={current[key]} onChange={(event) => setDraft({ ...current, [key]: Number(event.target.value) })} />
       </Field>)}

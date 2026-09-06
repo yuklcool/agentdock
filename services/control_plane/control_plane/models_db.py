@@ -384,7 +384,7 @@ user_agent_bindings = Table(
     Column("tenant_id", Text, ForeignKey("tenants.id"), primary_key=True),
     Column("user_id", Text, ForeignKey("users.id"), primary_key=True),
     Column("template_id", Text, ForeignKey("templates.id"), primary_key=True),
-    Column("container_id", Text, ForeignKey("containers.id")),
+    Column("container_id", Text, ForeignKey("containers.id", ondelete="SET NULL")),
     Column("lease_id", Text, nullable=False),
     Column("lease_until", TIMESTAMP(timezone=True), nullable=False),
     Column("status", Text, nullable=False),
