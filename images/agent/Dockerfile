@@ -2,6 +2,11 @@
 # syntax=docker/dockerfile:1.7
 # Build context is the monorepo root so we can COPY packages/agentcore + services/shim.
 
+# Reuse the supplied Nanobot + Node runtime without rebuilding Nanobot.
+# The immutable digest was pulled and inspected by the prebuilt image CI.
+ARG NANOBOT_BASE_IMAGE=registry.cn-hangzhou.aliyuncs.com/telchina/nanobot:0.3.0-node24@sha256:4830eebc736a219a7d3267b24c2fda07f305dea9af388811e89afc09db669d23
+FROM ${NANOBOT_BASE_IMAGE} AS nanobot-base
+
 ############ builder ############
 FROM python:3.12-slim-bookworm AS builder
 # Scope cache-mount ids per platform: concurrent multi-arch builds must NOT share
@@ -33,15 +38,11 @@ RUN --mount=type=cache,target=/root/.cache/uv,id=uv-${TARGETARCH} \
     uv pip install --python /opt/venv/bin/python --no-deps /src/agentcore \
     && uv pip install --python /opt/venv/bin/python --no-deps /src/shim
 
-# Independent Nanobot distribution; the source revision is protocol-tested.
-ARG NANOBOT_COMMIT=455533169d5a641300dd63d260b1ff5543c4093c
-RUN --mount=type=cache,target=/root/.cache/uv,id=nanobot-${TARGETARCH} \
-    uv venv /opt/nanobot \
-    && NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python /opt/nanobot/bin/python \
-       "https://github.com/HKUDS/nanobot/archive/${NANOBOT_COMMIT}.tar.gz"
-
 ############ runtime ############
-FROM python:3.12-slim-bookworm AS runtime
+FROM nanobot-base AS runtime
+USER root
+ARG NANOBOT_BASE_IMAGE
+LABEL org.opencontainers.image.base.name="${NANOBOT_BASE_IMAGE}"
 ARG VARIANT=full
 ARG TARGETARCH        # scopes the apt cache mount per platform (see builder stage)
 
@@ -54,17 +55,11 @@ RUN --mount=type=cache,target=/var/cache/apt,id=apt-runtime-${TARGETARCH} \
        fi \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Node.js (NodeSource) ---------------------------------------------------
-# Debian bookworm only ships Node 18, which is EOL (no upstream security
-# patches). The agent runs model-generated JS, so keep the runtime on a
-# supported LTS. NodeSource provides Node 24 for both amd64 and arm64; the
-# setup script self-installs its apt prereqs and bundles a current npm.
-ARG NODE_MAJOR=24
-RUN --mount=type=cache,target=/var/cache/apt,id=apt-runtime-${TARGETARCH} \
-    curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/* \
-    && node --version && npm --version
+# Nanobot and Node are inherited from the supplied image. Fail the build if a
+# future replacement changes the interpreter/CLI contract used by the Shim.
+RUN /app/.venv/bin/python -c "import sys, importlib.metadata as m; assert sys.version_info[:2] == (3, 12); assert m.version('nanobot-ai') == '0.3.0'" \
+    && test -x /app/.venv/bin/nanobot \
+    && node -e "if (process.versions.node.split('.')[0] !== '24') process.exit(1)"
 
 # --- opencode (Unit 3): the second launch driver shells out to this binary ---
 # Best-effort per spec §3.5.2 / index §11.5: if the npm install fails at
@@ -149,16 +144,17 @@ RUN mkdir -p /opt/node-proxy \
 COPY images/agent/node-proxy-preload.cjs /opt/node-proxy/preload.cjs
 
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /opt/nanobot /opt/nanobot
-RUN ln -s /opt/nanobot/bin/nanobot /usr/local/bin/nanobot
-ENV PATH="/opt/venv/bin:${PATH}"
+ENV PATH="/opt/venv/bin:/app/.venv/bin:${PATH}"
+ENV VIRTUAL_ENV=/opt/venv
 ENV CHROMIUM_PATH=/usr/bin/chromium
 # Load the proxy shim into every node process (workspace scripts included). Set
 # after all build-time npm installs so it only affects runtime.
 ENV NODE_OPTIONS="--require /opt/node-proxy/preload.cjs"
 
-RUN useradd -u 1000 -m -s /bin/bash agent \
-    && mkdir -p /workspace && chown -R agent:agent /workspace
+RUN if ! getent group 1000 >/dev/null; then groupadd -g 1000 agent; fi \
+    && if ! getent passwd 1000 >/dev/null; then useradd -u 1000 -g 1000 -m -s /bin/bash agent; fi \
+    && mkdir -p /home/agent /workspace \
+    && chown 1000:1000 /home/agent /workspace
 
 # Privilege separation splits /workspace ownership: the entrypoint root-owns
 # /workspace (1777, so the agent can't unlink shim-private .agent-runtime) while
@@ -173,8 +169,11 @@ RUN git config --system --add safe.directory /workspace
 COPY images/agent/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-USER agent
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8080
 ENV AGENT_IMAGE_VARIANT=${VARIANT}
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
+
+# Clear the upstream default command ("status"); Shim owns the process lifecycle.
+CMD []

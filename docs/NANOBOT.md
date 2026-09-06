@@ -1,6 +1,6 @@
 # AgentDock · Nanobot 集成指南
 
-AgentDock 是可自行部署的智能体容器管理平台。本版本把官方
+AgentDock 是可自行部署的智能体容器管理平台。本版本把
 [HKUDS/nanobot](https://github.com/HKUDS/nanobot) 作为独立执行引擎接入：
 一个 AgentDock Agent 实例对应一个 Docker 容器，容器中由 Shim 管理一个 Nanobot Gateway。
 
@@ -16,9 +16,18 @@ AgentDock 是可自行部署的智能体容器管理平台。本版本把官方
 - 将后台选择的远程 MCP 和 Skill 同步给 Nanobot 执行。
 - API key 配置和 MCP 密钥仅写入运行时临时目录；会话状态写入持久 Volume。
 
-Nanobot 固定源码版本：`455533169d5a641300dd63d260b1ff5543c4093c`。
-依赖安装在独立的 `/opt/nanobot` Python 环境中，与 Shim 的依赖分离。
-升级时同时更新 Dockerfile、Driver 中的版本常量和本指南，并重新跑协议联调测试。
+本版本复用现成镜像 `registry.cn-hangzhou.aliyuncs.com/telchina/nanobot:0.3.0-node24`，
+固定摘要 `sha256:4830eebc736a219a7d3267b24c2fda07f305dea9af388811e89afc09db669d23`。
+已检查其包含 Nanobot 0.3.0、Python 3.12.12、Node.js 24.19.0 和 Debian 12；当前验证平台为 `linux/amd64`。
+Nanobot 保持在镜像自带的 `/app/.venv` 中，Shim 单独安装到 `/opt/venv`，不会重新安装或修改 Nanobot。
+源码提交不能仅凭 `0.3.0` 标签推断，协议兼容性以该摘要对应镜像的真实网关验收为准。
+
+AgentDock 在此基础上加入 Shim、启动脚本、权限设置及原有其他执行引擎，产出
+`agent-runtime:0.2.0-nanobot`。原始 Nanobot 镜像的默认命令是 `status`，不提供 AgentDock Shim 接口，
+因此不可直接替换平台实例镜像。构建时保留原镜像各层，新增平台运行层；新建用户实例只启动容器，不重新构建。
+
+升级基础镜像时更新 Dockerfile 中的摘要和本指南，并重新跑镜像、MCP、三实例和会话恢复验收。
+`Prebuilt Nanobot image` 工作流检查基础镜像可拉取及版本；`AgentDock Nanobot` 检查完整平台运行行为。
 
 ## 部署与首次使用
 
@@ -28,8 +37,10 @@ cd agentdock
 make dev
 ```
 
-`make dev` 构建含 Nanobot 的 Agent 镜像并启动管理后台。镜像构建必须能访问
-GitHub 和 Python 包仓库。首次构建需要下载依赖；运行时不会临时下载 Nanobot。
+`make dev` 构建 AgentDock 运行层并启动管理后台。构建需要访问阿里云镜像仓库、
+Python/系统软件包仓库，以及原有执行引擎的下载源；不再从 GitHub 下载和安装 Nanobot 源码。
+只构建运行镜像可执行 `make image`，默认得到 `agent-runtime:0.2.0-nanobot`。
+新建或恢复实例时直接使用已构建镜像，不需要重新安装依赖。
 
 1. 打开 `http://localhost:5173`，使用启动命令输出的管理员账号登录并修改密码。
 2. 进入工作空间，在 **Settings → Credentials** 添加 OpenAI 或 Anthropic API key。
@@ -39,7 +50,7 @@ GitHub 和 Python 包仓库。首次构建需要下载依赖；运行时不会�
 6. 重复创建多个实例。每个实例拥有独立容器和 Volume，内部可以使用相同的 8765 端口。
 
 生产部署参见 [部署指南](../deploy/README.md) 和 [Coolify 指南](../deploy/COOLIFY.md)。
-本版本镜像标签为 `0.1.0-nanobot`，控制平面的 `AGENT_IMAGE_TAG` 必须指向本版本构建的镜像。
+本版本镜像标签为 `0.2.0-nanobot`，控制平面的 `AGENT_IMAGE_TAG` 必须指向本版本构建的镜像。
 原有实例不会因为更新控制平面而自动更换镜像；使用镜像更新流程重新创建运行容器，保留原 Volume。
 
 ## 组件职责与数据路径
@@ -210,7 +221,7 @@ PYTHONPATH=services/shim pytest services/shim/tests -m unit -q
 使用另一个租户身份尝试访问实例、任务和文件；检查备份恢复及数据库权限。
 
 
-真实网关联调（不需要外部模型 API key）：先在独立虚拟环境安装上述固定版本 Nanobot，并将
+真实网关联调（不需要外部模型 API key）：先在独立虚拟环境安装与基础镜像匹配的 Nanobot，并将
 `nanobot` 加入 PATH，然后执行：
 
 ```bash

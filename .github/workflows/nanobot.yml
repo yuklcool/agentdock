@@ -63,6 +63,8 @@ jobs:
           build-args: VARIANT=slim
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Default Shim entrypoint under production security limits
+        run: python scripts/test_agent_image.py --image agentdock-agent:test
       - name: Real gateway streaming and restart persistence with privilege drop
         run: |
           docker run --rm --user root \

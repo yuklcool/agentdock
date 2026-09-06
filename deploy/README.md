@@ -1,6 +1,6 @@
 # AgentDock 部署指南
 
-当前 Agent 镜像包含固定版本的官方 Nanobot。创建实例时选择 Nanobot 驱动，配置与接入方法见 [Nanobot 集成指南](../docs/NANOBOT.md)。
+当前 Agent 镜像复用阿里云预构建 Nanobot 0.3.0 / Node 24，并叠加 AgentDock 管理层（已验证 amd64）。创建实例时选择 Nanobot 驱动，配置与接入方法见 [Nanobot 集成指南](../docs/NANOBOT.md)。
 
 # Deploy: single-host topology
 
@@ -21,7 +21,7 @@ committed, insecure `deploy/.env.dev`.
 ## Prerequisites
 
 - Docker + docker compose v2.
-- The agent image built (Unit 1): `make image` → `agent-runtime:0.1.0-nanobot`.
+- The agent image built (Unit 1): `make image` → `agent-runtime:0.2.0-nanobot`.
 - **After bumping the agent image / opencode version**, regenerate and commit the
   model catalog: `make models-catalog` (Docker required; set
   `MODELS_CATALOG_CODEX_AUTH=/path/to/codex-auth.json` to include OpenAI

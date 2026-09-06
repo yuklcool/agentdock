@@ -1,0 +1,32 @@
+name: Prebuilt Nanobot image
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main, feat/prebuilt-nanobot-image]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-upstream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NANOBOT_IMAGE: registry.cn-hangzhou.aliyuncs.com/telchina/nanobot:0.3.0-node24@sha256:4830eebc736a219a7d3267b24c2fda07f305dea9af388811e89afc09db669d23
+    steps:
+      - name: Pull the supplied image and inspect runtime requirements
+        run: |
+          docker buildx imagetools inspect "$NANOBOT_IMAGE"
+          docker pull "$NANOBOT_IMAGE"
+          docker image inspect "$NANOBOT_IMAGE" --format '{{json .RepoDigests}} {{.Architecture}} {{json .Config.Entrypoint}} {{json .Config.Cmd}} {{.Config.WorkingDir}} {{.Config.User}}'
+          docker run --rm --entrypoint /bin/sh "$NANOBOT_IMAGE" -ec '
+            cat /etc/os-release
+            command -v python3
+            command -v nanobot || true
+            command -v uv || true
+            python3 --version
+            node --version
+            python3 -c "import importlib.metadata as m; print(m.version(\"nanobot-ai\"))"
+          '

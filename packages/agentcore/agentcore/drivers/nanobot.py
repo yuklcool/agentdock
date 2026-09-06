@@ -35,7 +35,6 @@ from agentcore.models import (
     TaskResult,
 )
 
-NANOBOT_COMMIT = "455533169d5a641300dd63d260b1ff5543c4093c"
 _CHAT_ID = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
 # Nanobot derives these directories from the config path, not workspace.
 _PERSISTENT_DIRS = ("sessions", "webui", "media", "cron", "logs")

@@ -1,7 +1,7 @@
 name: agent-image
 
 # Build + push the runtime-provisioned agent base image (NOT a compose service)
-# multi-arch. Driven by GitHub Releases so image publishes are explicit;
+# (amd64 prebuilt Nanobot base). Driven by GitHub Releases so image publishes are explicit;
 # workflow_dispatch is kept for manual/ad-hoc rebuilds. The image tag is the
 # release tag (a leading "agent-" is stripped), e.g. a release tagged "1.0.0"
 # -> ghcr.io/<owner>/agent-runtime:1.0.0.
@@ -52,7 +52,6 @@ jobs:
           echo "registry=${registry}" >> "$GITHUB_OUTPUT"
           echo "image=${registry}/agent-runtime" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-qemu-action@v3        # emulation for the foreign arch
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to the container registry
@@ -63,15 +62,15 @@ jobs:
           username: ${{ secrets.REGISTRY_PUSH_USER || github.actor }}
           password: ${{ secrets.REGISTRY_PUSH_PASSWORD || secrets.GITHUB_TOKEN }}
 
-      - name: Build + push (amd64 + arm64)
+      - name: Build + push (amd64)
         uses: docker/build-push-action@v6
         with:
           context: .                              # monorepo root (Dockerfile COPYs packages/ + services/)
           file: images/agent/Dockerfile
           build-args: VARIANT=full
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ steps.img.outputs.image }}:${{ steps.ver.outputs.version }}
             ${{ steps.img.outputs.image }}:${{ steps.ver.outputs.version }}-full
-          provenance: false                       # plain multi-arch manifest list, simplest to pull
+          provenance: false                       # plain manifest, simplest to pull

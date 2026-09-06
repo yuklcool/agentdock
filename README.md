@@ -33,6 +33,9 @@ cd agentdock
 make dev
 ```
 
+默认复用阿里云预构建的 Nanobot 0.3.0 / Node 24 镜像，固定摘要后叠加 AgentDock 管理层；
+`make image` 产出 `agent-runtime:0.2.0-nanobot`，当前验证平台为 `linux/amd64`。
+
 在管理后台添加 OpenAI/Anthropic API key，创建 Agent 时选择 **Nanobot**。
 多个实例相互独立；同一个实例目前一次执行一个任务，多个会话分别保存历史。
 支持同一工作空间内的用户私有实例及共享实例。普通成员仅访问自己的私有实例和共享实例；
