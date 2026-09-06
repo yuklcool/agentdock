@@ -7,6 +7,12 @@ _DEFAULTS: dict = {  # type: ignore[type-arg]
     "max_containers": 2000,
     "max_running_containers": 30,
     "max_users": 25,
+    "max_private_containers_per_user": 10,
+    # Zero means unlimited. Configure budgets before enabling paid production access.
+    "daily_token_budget": 0,
+    "daily_task_limit": 0,
+    "user_daily_token_budget": 0,
+    "user_daily_task_limit": 0,
     "max_concurrent_tasks_per_container": 4,
     # Worker cap for containers running the `api` driver (single-call, no
     # tools/subprocesses — safe at much higher concurrency than the default).

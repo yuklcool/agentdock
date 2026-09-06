@@ -1,4 +1,5 @@
 """/files/export and /files/import endpoint tests (workflow file transfer)."""
+
 from __future__ import annotations
 
 import io
@@ -31,9 +32,14 @@ async def test_export_dry_run_manifest(tmp_path):
     _mk(tmp_path, "report.pdf", b"12345")
     _mk(tmp_path, "dist/a.js", b"aa")
     async with app_client(tmp_path) as c:
-        r = await c.get("/files/export", params=[
-            ("paths", "report.pdf"), ("paths", "dist/**"), ("dry_run", "true"),
-        ])
+        r = await c.get(
+            "/files/export",
+            params=[
+                ("paths", "report.pdf"),
+                ("paths", "dist/**"),
+                ("dry_run", "true"),
+            ],
+        )
         assert r.status_code == 200
         body = r.json()
         assert body["total_bytes"] == 7
@@ -44,9 +50,13 @@ async def test_export_dry_run_manifest(tmp_path):
 async def test_export_unmatched_pattern_422(tmp_path):
     _mk(tmp_path, "a.txt")
     async with app_client(tmp_path) as c:
-        r = await c.get("/files/export", params=[
-            ("paths", "a.txt"), ("paths", "missing/**"),
-        ])
+        r = await c.get(
+            "/files/export",
+            params=[
+                ("paths", "a.txt"),
+                ("paths", "missing/**"),
+            ],
+        )
         assert r.status_code == 422
         assert r.json()["error"]["code"] == "unmatched_exports"
         assert r.json()["error"]["unmatched"] == ["missing/**"]
@@ -84,7 +94,8 @@ async def test_export_streams_tar(tmp_path):
 async def test_import_round_trip(tmp_path):
     src_ws = tmp_path / "src"
     dst_ws = tmp_path / "dst"
-    os.makedirs(src_ws); os.makedirs(dst_ws)
+    os.makedirs(src_ws)
+    os.makedirs(dst_ws)
     _mk(src_ws, "out/result.txt", b"payload")
     async with app_client(src_ws) as src, app_client(dst_ws) as dst:
         exported = await src.get("/files/export", params=[("paths", "out/**")])
@@ -123,8 +134,7 @@ async def test_import_over_cap_413(tmp_path):
         info.size = 100
         tf.addfile(info, io.BytesIO(b"z" * 100))
     async with app_client(tmp_path) as c:
-        r = await c.post("/files/import", params={"max_bytes": "10"},
-                         content=buf.getvalue())
+        r = await c.post("/files/import", params={"max_bytes": "10"}, content=buf.getvalue())
         assert r.status_code == 413
     # spool file cleaned up
     spool_dir = os.path.join(str(tmp_path), ".agent-runtime", "tmp")

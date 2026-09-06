@@ -23,7 +23,7 @@ def app(monkeypatch):
 
     @asynccontextmanager
     async def session():
-        yield object()
+        yield SimpleNamespace(info={})
 
     app.state.session_factory = session
     app.state.settings = object()

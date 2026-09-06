@@ -5,6 +5,7 @@ isolated in pure helpers (terminal_action / is_stuck); the DB orchestration
 (advance_workflow_runs, start_run) follows the scheduler's claim -> commit ->
 submit discipline and never holds a row lock across the shim network call.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -14,6 +15,12 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from agentcore.models import TaskBody
+from control_plane.access import (
+    actor_principal,
+    assert_target_access,
+    bind_principal,
+    session_principal,
+)
 from control_plane.ids import new_workflow_run_id
 from control_plane.models_db import (
     prompts,
@@ -112,12 +119,16 @@ def _step_timed_out(
 # --- step submission ---------------------------------------------------------
 async def _load_prompt(session: Any, tenant_id: str, pid: str) -> dict[str, Any] | None:
     row = (
-        await session.execute(
-            sa.select(prompts.c.body, prompts.c.variables).where(
-                prompts.c.id == pid, prompts.c.tenant_id == tenant_id
+        (
+            await session.execute(
+                sa.select(prompts.c.body, prompts.c.variables).where(
+                    prompts.c.id == pid, prompts.c.tenant_id == tenant_id
+                )
             )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     return dict(row) if row is not None else None
 
 
@@ -176,6 +187,8 @@ async def start_run(
     current_task_id already populated, in one commit. If the step-0 submit
     raises, no run row is written (the exception propagates to the caller)."""
     steps = workflow["steps"]
+    await assert_target_access(session, {step["container_id"] for step in steps})
+    actor = session_principal(session)
     run_id = new_workflow_run_id()
     task_id = await submit_step(
         session,
@@ -202,6 +215,8 @@ async def start_run(
             cursor=0,
             current_task_id=task_id,
             step_count=len(steps),
+            run_as_user_id=actor.user_id if actor else None,
+            run_as_role=actor.role if actor else "member",
             trigger_source=trigger_source,
             scheduled_task_id=scheduled_task_id,
             started_at=now,
@@ -210,7 +225,9 @@ async def start_run(
         )
     )
     await _emit_workflow_event(
-        session, run_id, "started",
+        session,
+        run_id,
+        "started",
         {
             "workflow_id": workflow["id"],
             "step_count": len(steps),
@@ -243,20 +260,22 @@ async def _task_status(db: Any, task_id: str | None) -> tuple[str | None, int | 
     if task_id is None:
         return None, None
     row = (
-        await db.execute(
-            sa.select(tasks.c.status, tasks.c.body, tasks.c.config_snapshot).where(
-                tasks.c.id == task_id
+        (
+            await db.execute(
+                sa.select(tasks.c.status, tasks.c.body, tasks.c.config_snapshot).where(
+                    tasks.c.id == task_id
+                )
             )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     if row is None:
         return None, None
     return row["status"], _resolve_step_timeout(row["body"], row["config_snapshot"])
 
 
-async def _emit_workflow_event(
-    db: Any, run_id: str, type_: str, payload: dict[str, Any]
-) -> None:
+async def _emit_workflow_event(db: Any, run_id: str, type_: str, payload: dict[str, Any]) -> None:
     """Append one event to workflow_events with the next per-run seq.
 
     Seq is allocated in-SQL (COALESCE(MAX(seq),0)+1 scoped to the run) so it is
@@ -283,18 +302,14 @@ async def _apply_run_update(
     commit: bool = True,
     event: tuple[str, dict[str, Any]] | None = None,
 ) -> None:
-    await db.execute(
-        workflow_runs.update().where(workflow_runs.c.id == run_id).values(**values)
-    )
+    await db.execute(workflow_runs.update().where(workflow_runs.c.id == run_id).values(**values))
     if event is not None:
         await _emit_workflow_event(db, run_id, event[0], event[1])
     if commit:
         await db.commit()
 
 
-async def _load_workflow_steps(
-    db: Any, tenant_id: str, workflow_id: str
-) -> list[dict[str, Any]]:
+async def _load_workflow_steps(db: Any, tenant_id: str, workflow_id: str) -> list[dict[str, Any]]:
     row = (
         await db.execute(
             sa.select(workflows.c.steps).where(
@@ -325,7 +340,10 @@ async def _fail_run(
     if steps is not None:
         vals["steps"] = mark_failed(steps, error_step, now)
     await _apply_run_update(
-        db, run_id, vals, commit=commit,
+        db,
+        run_id,
+        vals,
+        commit=commit,
         event=("failed", {"error_step": error_step, "error_message": message}),
     )
 
@@ -356,7 +374,12 @@ async def advance_workflow_runs(
         status, timeout_seconds = await _task_status(db, run.current_task_id)
         if status is None and is_stuck(run.current_task_id, run.step_started_at, now):
             await _fail_run(
-                db, run.id, run.steps, run.cursor, "step stuck/orphaned", now,
+                db,
+                run.id,
+                run.steps,
+                run.cursor,
+                "step stuck/orphaned",
+                now,
                 commit=False,
             )
             continue
@@ -368,7 +391,12 @@ async def advance_workflow_runs(
                 run.step_started_at, timeout_seconds, now
             ):
                 await _fail_run(
-                    db, run.id, run.steps, run.cursor, "step timed out / stuck", now,
+                    db,
+                    run.id,
+                    run.steps,
+                    run.cursor,
+                    "step timed out / stuck",
+                    now,
                     commit=False,
                 )
             continue
@@ -377,12 +405,20 @@ async def advance_workflow_runs(
             if run.steps is not None:
                 vals["steps"] = mark_completed(run.steps, run.cursor, now)
             await _apply_run_update(
-                db, run.id, vals, commit=False,
+                db,
+                run.id,
+                vals,
+                commit=False,
                 event=("completed", {"step_count": run.step_count}),
             )
         elif action == "fail":
             await _fail_run(
-                db, run.id, run.steps, run.cursor, "step task failed", now,
+                db,
+                run.id,
+                run.steps,
+                run.cursor,
+                "step task failed",
+                now,
                 commit=False,
             )
         elif action == "advance":
@@ -403,6 +439,23 @@ async def advance_workflow_runs(
     # --- Submit phase: no lock held. ----------------------------------------
     for run, next_cursor, tl in to_submit:
         steps = await _load_workflow_steps(db, run.tenant_id, run.workflow_id)
+        try:
+            bind_principal(
+                db,
+                await actor_principal(
+                    db,
+                    run.tenant_id,
+                    getattr(run, "run_as_user_id", None),
+                    getattr(run, "run_as_role", "member"),
+                ),
+            )
+            await assert_target_access(db, {step["container_id"] for step in steps})
+        except Exception:
+            await db.rollback()
+            await _fail_run(
+                db, run.id, tl, next_cursor, "automation target no longer authorized", now
+            )
+            continue
         if next_cursor >= len(steps):  # steps trimmed mid-run -> complete cleanly
             await _apply_run_update(
                 db,
@@ -433,15 +486,18 @@ async def advance_workflow_runs(
             except WorkflowTransferError as exc:
                 await _fail_run(db, run.id, tl, prev_index, str(exc), now)
                 continue
-            payload = {"step": prev_index,
-                       "files": summary["files"], "bytes": summary["bytes"]}
+            payload = {"step": prev_index, "files": summary["files"], "bytes": summary["bytes"]}
             if tl is not None:
                 tl = mark_transfer(
-                    tl, prev_index,
-                    files=summary["files"], bytes_=summary["bytes"],
+                    tl,
+                    prev_index,
+                    files=summary["files"],
+                    bytes_=summary["bytes"],
                 )
                 await _apply_run_update(
-                    db, run.id, {"steps": tl},
+                    db,
+                    run.id,
+                    {"steps": tl},
                     event=("files_transferred", payload),
                 )
             else:
@@ -466,15 +522,22 @@ async def advance_workflow_runs(
         vals: dict[str, Any] = {"current_task_id": task_id}
         if tl is not None:
             tl2 = mark_running(
-                tl, next_cursor, started_at=now,
+                tl,
+                next_cursor,
+                started_at=now,
                 container_id=steps[next_cursor].get("container_id"),
             )
             vals["steps"] = mark_task(tl2, next_cursor, task_id)
         await _apply_run_update(
-            db, run.id, vals,
-            event=("step_advanced", {
-                "from_step": next_cursor - 1,
-                "to_step": next_cursor,
-                "task_id": task_id,
-            }),
+            db,
+            run.id,
+            vals,
+            event=(
+                "step_advanced",
+                {
+                    "from_step": next_cursor - 1,
+                    "to_step": next_cursor,
+                    "task_id": task_id,
+                },
+            ),
         )

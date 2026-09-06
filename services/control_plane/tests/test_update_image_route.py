@@ -24,7 +24,7 @@ _SETTINGS = Settings(
 )
 _APP = create_app(_SETTINGS)
 # Principal fields: tenant_id, role, is_staff, user_id
-_PRINCIPAL = Principal(tenant_id="ten_1", role="member", is_staff=False, user_id=None)
+_PRINCIPAL = Principal(tenant_id="ten_1", role="admin", is_staff=False, user_id="usr_admin")
 CID = "ctr_1"
 
 
@@ -78,3 +78,14 @@ def test_update_image_blank_tag_rejected(monkeypatch) -> None:
     r = client.post(f"/v1/containers/{CID}/update-image", json={"image_tag": "   "})
     # validation_error() maps to APIError(400, ...) in control_plane/errors.py
     assert r.status_code == 400
+
+
+def test_update_image_rejects_member(monkeypatch):
+    with _client(monkeypatch) as client:
+        _APP.dependency_overrides[resolve_principal] = lambda: Principal(
+            tenant_id="ten_1", role="member", is_staff=False, user_id="usr_member"
+        )
+        assert (
+            client.post(f"/v1/containers/{CID}/update-image", json={"image_tag": "dev"}).status_code
+            == 403
+        )

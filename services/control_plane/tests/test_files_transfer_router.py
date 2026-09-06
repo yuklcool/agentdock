@@ -54,6 +54,8 @@ class _FakeContainer:
     returns; _require_running reads .status and the route reads .name."""
 
     def __init__(self, status: str) -> None:
+        self.tenant_id = "ten_1"
+        self.owner_user_id = None
         self.id = "con_1"
         self.name = "My Box!"
         self.status = status

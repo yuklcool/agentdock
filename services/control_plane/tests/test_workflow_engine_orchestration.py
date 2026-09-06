@@ -75,6 +75,8 @@ def _wire(monkeypatch, *, runs, status, steps=None, submit=None, timeout=None):
     applied: list[tuple[str, dict, bool]] = []
     submitted: list[tuple[int, str]] = []
 
+    # Target ACL is covered against PostgreSQL in test_private_instances.py.
+    monkeypatch.setattr(eng, "assert_target_access", _const(None))
     monkeypatch.setattr(eng, "_claim_active_runs", _aiter(runs))
     monkeypatch.setattr(eng, "_task_status", _const((status, timeout)))
     monkeypatch.setattr(eng, "_load_workflow_steps", _const(_STEPS if steps is None else steps))

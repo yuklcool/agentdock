@@ -289,3 +289,7 @@ Released under the [MIT License](LICENSE).
 **Keywords:** self-hosted AI agents · autonomous agent infrastructure · sandboxed AI agents · multi-tenant agent platform · long-lived AI agents · Docker AI agents · LLM agent runtime · Claude Code · OpenAI Codex · opencode · MCP · FastAPI · agent orchestration · AI agent fleet · self-hosted LLM automation
 
 </div>
+
+## 多用户 Nanobot 与运维
+
+AgentDock 支持按用户自动创建私有 Nanobot 实例、个人 API Key、统一 WebSocket、任务与文件权限隔离、每日配额、监控告警及加密备份恢复。详见 [Nanobot 接入指南](docs/NANOBOT.md) 和 [运维指南](deploy/OPERATIONS.md)。

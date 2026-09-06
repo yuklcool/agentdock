@@ -19,9 +19,9 @@ import type { ApiKeyCreated, ApiKeyRow } from "../../api/types";
 
 type SortKey = "last_used" | "created" | "name";
 
-export default function ApiKeys() {
-  const { data, error } = useApiKeys();
-  const create = useCreateApiKey();
+export default function ApiKeys({ personal = false }: { personal?: boolean }) {
+  const { data, error } = useApiKeys(personal);
+  const create = useCreateApiKey(personal);
   const qc = useQueryClient();
   const toast = useToast();
   const [creating, setCreating] = useState(false);
@@ -60,7 +60,7 @@ export default function ApiKeys() {
 
   async function onRevoke(k: ApiKeyRow) {
     try {
-      await api.del(`/v1/api-keys/${k.id}`);
+      await api.del(`${personal ? "/v1/me/api-keys" : "/v1/api-keys"}/${k.id}`);
       toast.success(`Revoked ${k.name}`);
       qc.invalidateQueries({ queryKey: keys.apiKeys });
       setRevoking(null);
@@ -74,13 +74,13 @@ export default function ApiKeys() {
       {/* Header */}
       <div className="page-title">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em", margin: 0 }}>API keys</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em", margin: 0 }}>{personal ? "个人 API Key" : "API keys"}</h1>
           <span className="pill pill-dormant" style={{ fontWeight: 500 }}>
             {sorted.length} {sorted.length === 1 ? "key" : "keys"}
           </span>
         </div>
         <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>
-          Programmatic credentials for machine access to the agentdock API.
+          {personal ? "用于访问你自己的私有实例及工作空间共享资源；创建后仅显示一次。" : "Programmatic credentials for machine access to the AgentDock API."}
         </div>
       </div>
 

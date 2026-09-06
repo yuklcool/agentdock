@@ -54,7 +54,7 @@ async def create_workspace(
     Errors: 401 unauthorized when unauthenticated; 403 forbidden for an API-key
     principal (no user session) or when the owned-workspace limit is reached.
     """
-    if principal.user_id is None:
+    if principal.user_id is None or principal.auth_method != "session":
         raise api_error(403, "forbidden", "Creating a workspace requires a user session")
 
     # Soft per-user cap (read-then-create; not DB-enforced). Adequate for a

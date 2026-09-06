@@ -313,7 +313,7 @@ async def select_tenant(
     404 not_found when staff target a tenant that does not exist; 400
     validation_error when a member omits `tenant_id`.
     """
-    if principal.user_id is None:
+    if principal.user_id is None or principal.auth_method != "session":
         raise api_error(403, "forbidden", "Tenant selection requires a user session")
     cookie = request.cookies.get(SESSION_COOKIE)
 
@@ -398,7 +398,7 @@ async def me(
 
     Error: 404 not_found if the session references a user that no longer exists.
     """
-    if principal.user_id is None:
+    if principal.user_id is None or principal.auth_method != "session":
         # API key or bootstrap principal: return the tenant identity.
         return {
             "principal": "api_key" if not principal.is_staff else "staff",

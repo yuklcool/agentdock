@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import subprocess
 
 import pytest
@@ -48,7 +49,7 @@ async def test_create_then_delete_lifecycle(seeded_app: object) -> None:
         cid = r.json()["id"]
         assert r.json()["status"] == "running"
 
-        docker_name = "agent-c-" + cid[len("con_"):]
+        docker_name = "agent-c-" + cid[len("con_") :]
         volume_name = "agent-vol-" + cid
         assert _docker_exists("container", docker_name), (
             f"Expected Docker container {docker_name!r} to exist"
@@ -86,7 +87,7 @@ async def test_update_resources_live_no_restart(seeded_app: object) -> None:
         cid = r.json()["id"]
         assert r.json()["mem_limit"] == "4g"
         assert r.json()["cpus"] == 2.0
-        docker_name = "agent-c-" + cid[len("con_"):]
+        docker_name = "agent-c-" + cid[len("con_") :]
 
         p = await c.patch(
             f"/v1/containers/{cid}/resources",
@@ -95,16 +96,24 @@ async def test_update_resources_live_no_restart(seeded_app: object) -> None:
         )
         assert p.status_code == 200, p.text
         assert p.json() == {
-            "id": cid, "status": "running", "mem_limit": "1g", "cpus": 0.5, "applied": True,
+            "id": cid,
+            "status": "running",
+            "mem_limit": "1g",
+            "cpus": 0.5,
+            "applied": True,
         }
 
-        inspect = subprocess.run(
+        inspect = (await asyncio.to_thread(subprocess.run,
             [
-                "docker", "inspect", docker_name, "--format",
+                "docker",
+                "inspect",
+                docker_name,
+                "--format",
                 "{{.HostConfig.Memory}} {{.HostConfig.CpuPeriod}} {{.HostConfig.CpuQuota}}",
             ],
-            capture_output=True, text=True,
-        ).stdout.strip()
+            capture_output=True,
+            text=True,
+        )).stdout.strip()
         mem_bytes, cpu_period, cpu_quota = inspect.split()
         assert int(mem_bytes) == 1 * 1024**3
         assert int(cpu_period) == 100_000

@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from analytics_seed import insert_container, insert_task, insert_tenant
 
 from control_plane import analytics_service as svc
-from analytics_seed import insert_container, insert_task, insert_tenant
 
 
 @pytest.mark.asyncio

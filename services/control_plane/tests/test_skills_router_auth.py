@@ -12,6 +12,7 @@ Note: true cross-tenant DB isolation (the `tenant_id == principal.tenant_id`
 WHERE predicate) is enforced in SQL and not observable through the fake session;
 it shares the same pattern as the templates/credentials routers.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -63,7 +64,7 @@ class _FakeSession:
     def __init__(self, rows: list[Any]) -> None:
         self._rows = rows
 
-    async def __aenter__(self) -> "_FakeSession":
+    async def __aenter__(self) -> _FakeSession:
         return self
 
     async def __aexit__(self, *exc: Any) -> bool:
@@ -96,6 +97,7 @@ _BODY = {"name": "git-release", "description": "Make releases"}
 
 # --- create / patch / delete require admin -----------------------------------
 
+
 def test_member_forbidden_to_create() -> None:
     _use(MEMBER)
     with TestClient(app) as c:
@@ -127,14 +129,18 @@ def test_member_forbidden_to_delete() -> None:
 
 # --- admin / owner allowed to create -----------------------------------------
 
+
 def test_admin_creates_skill_and_detail_view_has_body() -> None:
     _use(ADMIN, rows=[])  # dup-check finds nothing
     with TestClient(app) as c:
-        r = c.post("/v1/skills", json={"name": "git-release", "description": "Make releases", "body": "# do"})
+        r = c.post(
+            "/v1/skills",
+            json={"name": "git-release", "description": "Make releases", "body": "# do"},
+        )
     assert r.status_code == 200
     j = r.json()
     assert j["name"] == "git-release"
-    assert j["body"] == "# do"          # create returns the detail view
+    assert j["body"] == "# do"  # create returns the detail view
     assert "tenant_id" not in j
 
 
@@ -147,20 +153,32 @@ def test_owner_allowed_to_create() -> None:
 
 # --- list is member-open and ships no body -----------------------------------
 
+
 def test_member_can_list_and_list_omits_body() -> None:
-    row = _Row({"id": "skl_1", "tenant_id": "ten_1", "name": "git-release",
-                "description": "Make releases", "body": "secret-big-body", "enabled": True,
-                "created_by": "u", "created_at": "t", "updated_at": "t"})
+    row = _Row(
+        {
+            "id": "skl_1",
+            "tenant_id": "ten_1",
+            "name": "git-release",
+            "description": "Make releases",
+            "body": "secret-big-body",
+            "enabled": True,
+            "created_by": "u",
+            "created_at": "t",
+            "updated_at": "t",
+        }
+    )
     _use(MEMBER, rows=[row])
     with TestClient(app) as c:
         r = c.get("/v1/skills")
     assert r.status_code == 200
     skills = r.json()["skills"]
     assert skills[0]["name"] == "git-release"
-    assert "body" not in skills[0]      # list never ships the body
+    assert "body" not in skills[0]  # list never ships the body
 
 
 # --- validation + conflict + not-found + staff edge --------------------------
+
 
 def test_admin_create_invalid_name_is_400() -> None:
     _use(ADMIN, rows=[])
@@ -210,6 +228,7 @@ def test_staff_create_returns_clean_403_not_500() -> None:
 
 
 # --- git-refs (branch picker) ------------------------------------------------
+
 
 def test_member_forbidden_to_list_git_refs() -> None:
     _use(MEMBER)
@@ -265,11 +284,13 @@ def test_git_refs_ok_returns_branches(monkeypatch) -> None:
 
 # --- git-discover (multi-skill repo picker) -----------------------------------
 
+
 def test_member_forbidden_to_discover() -> None:
     _use(MEMBER)
     with TestClient(app) as c:
-        r = c.post("/v1/skills/git-discover",
-                   json={"source_url": "https://x/y.git", "source_ref": "main"})
+        r = c.post(
+            "/v1/skills/git-discover", json={"source_url": "https://x/y.git", "source_ref": "main"}
+        )
     assert r.status_code == 403
 
 
@@ -296,8 +317,10 @@ def test_discover_bad_scheme_is_422(monkeypatch) -> None:
     monkeypatch.setattr("control_plane.routers.skills.discover_git_skills", _reject)
     _use(ADMIN)
     with TestClient(app) as c:
-        r = c.post("/v1/skills/git-discover",
-                   json={"source_url": "git@github.com:x/y.git", "source_ref": "main"})
+        r = c.post(
+            "/v1/skills/git-discover",
+            json={"source_url": "git@github.com:x/y.git", "source_ref": "main"},
+        )
     assert r.status_code == 422
     assert r.json()["error"]["field"] == "source_url"
 
@@ -309,8 +332,9 @@ def test_discover_unknown_ref_is_422_on_ref_field(monkeypatch) -> None:
     monkeypatch.setattr("control_plane.routers.skills.discover_git_skills", _boom)
     _use(ADMIN)
     with TestClient(app) as c:
-        r = c.post("/v1/skills/git-discover",
-                   json={"source_url": "https://x/y.git", "source_ref": "nope"})
+        r = c.post(
+            "/v1/skills/git-discover", json={"source_url": "https://x/y.git", "source_ref": "nope"}
+        )
     assert r.status_code == 422
     assert r.json()["error"]["field"] == "source_ref"
 
@@ -322,8 +346,9 @@ def test_discover_unreachable_is_502(monkeypatch) -> None:
     monkeypatch.setattr("control_plane.routers.skills.discover_git_skills", _boom)
     _use(ADMIN)
     with TestClient(app) as c:
-        r = c.post("/v1/skills/git-discover",
-                   json={"source_url": "https://x/y.git", "source_ref": "main"})
+        r = c.post(
+            "/v1/skills/git-discover", json={"source_url": "https://x/y.git", "source_ref": "main"}
+        )
     assert r.status_code == 502
     assert r.json()["error"]["code"] == "skill_discover_error"
 
@@ -334,22 +359,31 @@ def test_discover_ok_flags_installed_names(monkeypatch) -> None:
     monkeypatch.setattr(
         "control_plane.routers.skills.discover_git_skills",
         lambda **_kw: DiscoveredRepo(
-            pinned_sha="a" * 40, truncated=False,
+            pinned_sha="a" * 40,
+            truncated=False,
             skills=[
-                DiscoveredSkill(subpath="x", name="already-here",
-                                description="d1", valid=True, error=None),
-                DiscoveredSkill(subpath="y", name="brand-new",
-                                description="d2", valid=True, error=None),
-                DiscoveredSkill(subpath="z", name="", description="",
-                                valid=False, error="SKILL.md missing frontmatter"),
+                DiscoveredSkill(
+                    subpath="x", name="already-here", description="d1", valid=True, error=None
+                ),
+                DiscoveredSkill(
+                    subpath="y", name="brand-new", description="d2", valid=True, error=None
+                ),
+                DiscoveredSkill(
+                    subpath="z",
+                    name="",
+                    description="",
+                    valid=False,
+                    error="SKILL.md missing frontmatter",
+                ),
             ],
         ),
     )
     # The installed-names query returns one existing skill name.
     _use(ADMIN, rows=[_Row({"name": "already-here"})])
     with TestClient(app) as c:
-        r = c.post("/v1/skills/git-discover",
-                   json={"source_url": "https://x/y.git", "source_ref": "main"})
+        r = c.post(
+            "/v1/skills/git-discover", json={"source_url": "https://x/y.git", "source_ref": "main"}
+        )
     assert r.status_code == 200
     j = r.json()
     assert j["ok"] is True

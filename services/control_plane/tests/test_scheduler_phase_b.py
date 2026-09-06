@@ -1,5 +1,6 @@
 # services/control_plane/tests/test_scheduler_phase_b.py
 import pytest
+
 import control_plane.scheduler as scheduler_mod
 
 pytestmark = pytest.mark.unit

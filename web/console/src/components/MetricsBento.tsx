@@ -86,7 +86,7 @@ export function MetricsBento({
           </span>
           <Delta value={halfDelta(tokenSeries)} dark />
         </div>
-        <div className="hero-num">{formatCompact(totals.tokens)}</div>
+        <div className="hero-num" data-testid="kpi-tokens">{formatCompact(totals.tokens)}</div>
         <div className="hero-sub">
           <span><b className="num">{formatCompact(tokensIn)}</b> in</span>
           <span style={{ opacity: .5 }}>·</span>
@@ -100,7 +100,7 @@ export function MetricsBento({
       {/* Success rate */}
       <div className="tile">
         <span className="tile-label"><Icons.Check w={13} /> Success rate</span>
-        <div className="stat-num">{successLabel}</div>
+        <div className="stat-num" data-testid="kpi-success">{successLabel}</div>
         <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
           <b className="num" style={{ color: "var(--ink)" }}>{completed}</b> of <span className="num">{totals.tasks.toLocaleString()}</span> completed
         </div>
@@ -142,7 +142,7 @@ export function MetricsBento({
           <span className="tile-label"><Icons.Container w={13} /> Fleet</span>
           <span className="tile-meta">
             <i className="dot" style={{ background: running > 0 ? "var(--p-400)" : "var(--muted-2)" }} />
-            <b className="num">{running}</b> live
+            <b className="num" data-testid="count-running">{running}</b> live
           </span>
         </div>
         <div className="stat-num" style={{ marginBottom: 8 }}>{containers.length}</div>

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, WebSocket
 from sqlalchemy import select
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
+from control_plane.access import visible_containers
 from control_plane.audit import audit
 from control_plane.auth.principal import (
     DbPrincipalRepo,
@@ -95,7 +96,7 @@ async def _load_owned_running(websocket: WebSocket, principal: Principal, cid: s
             await session.execute(
                 select(containers).where(
                     containers.c.id == cid,
-                    containers.c.tenant_id == principal.tenant_id,
+                    visible_containers(principal),
                 )
             )
         ).first()

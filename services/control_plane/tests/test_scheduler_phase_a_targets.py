@@ -2,12 +2,14 @@
 
 Covers:
 - prompt target → calls submit_task_core with the resolved prompt, records last_run_ref
-- workflow target with an ACTIVE run → records last_status='skipped_overlap', does NOT call start_run
+- workflow target with an active run: records last_status='skipped_overlap', does NOT call start_run
 - workflow target with NO active run → calls start_run once, records last_run_ref
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -30,7 +32,7 @@ class _DueRow:
 async def _fire(row, monkeypatch_apply_fn):
     """Helper: call _submit_due_schedule with sensible no-op defaults."""
     await scheduler_mod._submit_due_schedule(
-        session=object(),
+        session=SimpleNamespace(info={}),
         row=row,
         now=_NOW,
         settings=object(),
@@ -44,15 +46,18 @@ async def _fire(row, monkeypatch_apply_fn):
 # prompt target
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_prompt_target_calls_submit_task_core_with_resolved_prompt(monkeypatch):
     """Prompt target resolves body+variables and passes TaskBody to submit_task_core."""
-    row = _DueRow({
-        "kind": "prompt",
-        "prompt_id": "pmt_1",
-        "container_id": "con_1",
-        "variables": {"name": "world"},
-    })
+    row = _DueRow(
+        {
+            "kind": "prompt",
+            "prompt_id": "pmt_1",
+            "container_id": "con_1",
+            "variables": {"name": "world"},
+        }
+    )
 
     async def fake_load_prompt_row(session, tenant_id, prompt_id):
         assert tenant_id == "ten_1"
@@ -90,11 +95,13 @@ async def test_prompt_target_calls_submit_task_core_with_resolved_prompt(monkeyp
 @pytest.mark.asyncio
 async def test_prompt_target_records_failed_on_submit_error(monkeypatch):
     """If submit_task_core raises, last_status='failed' and last_run_ref is None."""
-    row = _DueRow({
-        "kind": "prompt",
-        "prompt_id": "pmt_1",
-        "container_id": "con_1",
-    })
+    row = _DueRow(
+        {
+            "kind": "prompt",
+            "prompt_id": "pmt_1",
+            "container_id": "con_1",
+        }
+    )
 
     async def fake_load_prompt_row(session, tenant_id, prompt_id):
         return {"body": "Hello", "variables": []}
@@ -122,6 +129,7 @@ async def test_prompt_target_records_failed_on_submit_error(monkeypatch):
 # ---------------------------------------------------------------------------
 # workflow target — overlap guard
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_workflow_target_with_active_run_skips(monkeypatch):

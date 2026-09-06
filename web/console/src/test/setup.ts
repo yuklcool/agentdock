@@ -1,3 +1,4 @@
+import { transferableAbortController } from "node:util";
 import "@testing-library/jest-dom/vitest";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { server } from "./server";
@@ -17,3 +18,8 @@ globalThis.ResizeObserver = globalThis.ResizeObserver ?? ResizeObserverStub;
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function () {};
 }
+
+// React Router uses Node fetch; keep abort objects in that same realm.
+const nativeAbort = transferableAbortController();
+globalThis.AbortController = nativeAbort.constructor as typeof AbortController;
+globalThis.AbortSignal = nativeAbort.signal.constructor as typeof AbortSignal;

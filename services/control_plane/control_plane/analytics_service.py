@@ -10,6 +10,7 @@ inference cannot bind them as parameters when Postgres expects them as literal
 text/interval values. Both values come exclusively from hardcoded whitelists so
 there is no SQL-injection risk.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -17,7 +18,24 @@ from typing import Any
 
 from sqlalchemy import TIMESTAMP, bindparam, text
 
+from control_plane.access import is_manager, session_principal
 from control_plane.schemas import BreakdownGroupOut, UsageBucketOut
+
+_ACCESS_SQL = """
+AND EXISTS (SELECT 1 FROM containers acl_c
+    WHERE acl_c.id = t.container_id AND acl_c.tenant_id = t.tenant_id
+    AND (CAST(:acl_admin AS boolean) OR acl_c.owner_user_id IS NULL
+         OR acl_c.owner_user_id = CAST(:acl_user AS text)))
+"""
+
+
+def _access_params(session: Any) -> dict[str, Any]:
+    principal = session_principal(session)
+    return {
+        "acl_admin": principal is None or is_manager(principal),
+        "acl_user": principal.user_id if principal else None,
+    }
+
 
 _INTERVAL_STEP = {"hour": "1 hour", "day": "1 day"}
 
@@ -45,6 +63,7 @@ def _usage_sql(trunc: str, step: str) -> Any:
               AND t.created_at >= :start
               AND t.created_at <  :end
               AND date_trunc('{trunc}', t.created_at) = b.bucket
+              {_ACCESS_SQL}
         GROUP BY b.bucket
         ORDER BY b.bucket
         """
@@ -61,14 +80,16 @@ async def usage_series(
     rows = (
         await session.execute(
             _usage_sql(interval, step),
-            {"tenant_id": tenant_id, "start": start, "end": end},
+            {"tenant_id": tenant_id, "start": start, "end": end, **_access_params(session)},
         )
     ).all()
     return [
         UsageBucketOut(
             start=r.start.isoformat(),
-            tokens_in=int(r.tokens_in), tokens_out=int(r.tokens_out),
-            tasks=int(r.tasks), iterations=int(r.iterations),
+            tokens_in=int(r.tokens_in),
+            tokens_out=int(r.tokens_out),
+            tasks=int(r.tasks),
+            iterations=int(r.iterations),
         )
         for r in rows
     ]
@@ -93,31 +114,36 @@ async def breakdown(
     session: Any, *, tenant_id: str, start: datetime, end: datetime, by: str
 ) -> list[BreakdownGroupOut]:
     col = _BREAKDOWN_COL[by]  # whitelisted identifier — safe to interpolate
-    where = ("WHERE t.tenant_id = :tenant_id "
-             "AND t.created_at >= :start AND t.created_at < :end")
+    where = (
+        "WHERE t.tenant_id = :tenant_id "
+        "AND t.created_at >= :start AND t.created_at < :end " + _ACCESS_SQL
+    )
     if by == "container":
         sql = text(
             f"SELECT t.container_id AS key, c.name AS label, {_AGG} "
-            f"FROM tasks t JOIN containers c ON c.id = t.container_id AND c.tenant_id = t.tenant_id "
+            "FROM tasks t JOIN containers c ON c.id = t.container_id "
+            "AND c.tenant_id = t.tenant_id "
             f"{where} GROUP BY t.container_id, c.name"
         )
     else:
-        sql = text(
-            f"SELECT {col} AS key, {_AGG} "
-            f"FROM tasks t {where} GROUP BY {col}"
-        )
+        sql = text(f"SELECT {col} AS key, {_AGG} FROM tasks t {where} GROUP BY {col}")
     rows = (
         await session.execute(
-            sql, {"tenant_id": tenant_id, "start": start, "end": end}
+            sql, {"tenant_id": tenant_id, "start": start, "end": end, **_access_params(session)}
         )
     ).all()
     out: list[BreakdownGroupOut] = []
     for r in rows:
         key = "" if r.key is None else str(r.key)
         label = str(getattr(r, "label", None) or key) if by == "container" else (key or "(none)")
-        out.append(BreakdownGroupOut(
-            key=key, label=label,
-            tokens_in=int(r.tokens_in), tokens_out=int(r.tokens_out),
-            tasks=int(r.tasks), iterations=int(r.iterations),
-        ))
+        out.append(
+            BreakdownGroupOut(
+                key=key,
+                label=label,
+                tokens_in=int(r.tokens_in),
+                tokens_out=int(r.tokens_out),
+                tasks=int(r.tasks),
+                iterations=int(r.iterations),
+            )
+        )
     return out

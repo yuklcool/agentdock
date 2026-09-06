@@ -6,7 +6,8 @@ import sqlalchemy as sa
 from control_plane.models_db import metadata  # Unit 2 exposes `metadata`
 
 tenants = sa.Table(
-    "tenants", metadata,
+    "tenants",
+    metadata,
     sa.Column("id", sa.Text, primary_key=True),
     sa.Column("name", sa.Text, nullable=False),
     sa.Column("limits", sa.JSON, nullable=False),
@@ -17,7 +18,8 @@ tenants = sa.Table(
 )
 
 users = sa.Table(
-    "users", metadata,
+    "users",
+    metadata,
     sa.Column("id", sa.Text, primary_key=True),
     sa.Column("email", sa.Text, nullable=False),
     sa.Column("name", sa.Text, nullable=False),
@@ -31,11 +33,14 @@ users = sa.Table(
 )
 
 memberships = sa.Table(
-    "memberships", metadata,
+    "memberships",
+    metadata,
     sa.Column("id", sa.Text, primary_key=True),
     sa.Column("user_id", sa.Text, sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-    sa.Column("tenant_id", sa.Text, sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-    sa.Column("role", sa.Text, nullable=False),            # owner | admin | member
+    sa.Column(
+        "tenant_id", sa.Text, sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    ),
+    sa.Column("role", sa.Text, nullable=False),  # owner | admin | member
     sa.Column("status", sa.Text, nullable=False, server_default="active"),
     sa.Column("created_at", sa.TIMESTAMP(timezone=True)),
     sa.Column("updated_at", sa.TIMESTAMP(timezone=True)),
@@ -45,13 +50,16 @@ memberships = sa.Table(
 sa.Index("idx_memberships_user", memberships.c.user_id)
 sa.Index("idx_memberships_tenant", memberships.c.tenant_id)
 sa.Index(
-    "idx_membership_one_owner", memberships.c.tenant_id,
-    unique=True, postgresql_where=sa.text("role = 'owner' AND status = 'active'"),
+    "idx_membership_one_owner",
+    memberships.c.tenant_id,
+    unique=True,
+    postgresql_where=sa.text("role = 'owner' AND status = 'active'"),
 )
 
 
 sessions = sa.Table(
-    "sessions", metadata,
+    "sessions",
+    metadata,
     sa.Column("id", sa.Text, primary_key=True),
     sa.Column("user_id", sa.Text, nullable=False),
     sa.Column("active_tenant_id", sa.Text),
@@ -64,7 +72,9 @@ sessions = sa.Table(
 )
 
 api_keys = sa.Table(
-    "api_keys", metadata,
+    "api_keys",
+    metadata,
+    sa.Column("owner_user_id", sa.Text, sa.ForeignKey("users.id"), nullable=True),
     sa.Column("id", sa.Text, primary_key=True),
     sa.Column("tenant_id", sa.Text, nullable=False),
     sa.Column("name", sa.Text, nullable=False),
@@ -79,7 +89,8 @@ api_keys = sa.Table(
 )
 
 credentials = sa.Table(
-    "credentials", metadata,
+    "credentials",
+    metadata,
     sa.Column("id", sa.Text, primary_key=True),
     sa.Column("tenant_id", sa.Text, nullable=False),
     sa.Column("provider", sa.Text, nullable=False),
@@ -98,7 +109,8 @@ credentials = sa.Table(
 )
 
 oauth_connections = sa.Table(
-    "oauth_connections", metadata,
+    "oauth_connections",
+    metadata,
     sa.Column("id", sa.Text, primary_key=True),
     sa.Column("tenant_id", sa.Text, nullable=False),
     sa.Column("provider", sa.Text, nullable=False),
@@ -107,8 +119,10 @@ oauth_connections = sa.Table(
     sa.Column("error", sa.Text, nullable=True),
     sa.Column("credential_id", sa.Text, nullable=True),
     sa.Column(
-        "created_at", sa.TIMESTAMP(timezone=True),
-        nullable=False, server_default=sa.text("now()"),
+        "created_at",
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=sa.text("now()"),
     ),
     sa.Column("expires_at", sa.TIMESTAMP(timezone=True), nullable=False),
     extend_existing=True,

@@ -4,8 +4,8 @@ pytestmark = pytest.mark.unit
 
 
 def test_build_task_skills_resolves_for_claude_code(monkeypatch):
-    from control_plane.routers import tasks as tasks_mod
     from agentcore.models import AgentConfig, ShimSkill
+    from control_plane.routers import tasks as tasks_mod
 
     monkeypatch.setattr(
         tasks_mod,
@@ -18,16 +18,16 @@ def test_build_task_skills_resolves_for_claude_code(monkeypatch):
 
 
 def test_build_task_skills_empty_when_no_skills(monkeypatch):
-    from control_plane.routers import tasks as tasks_mod
     from agentcore.models import AgentConfig
+    from control_plane.routers import tasks as tasks_mod
 
     cfg = AgentConfig(driver="claude-code", model="claude-opus-4-8", skills=[])
     assert tasks_mod.build_task_skills(cfg, []) == []
 
 
 def test_build_task_mcp_resolves_for_claude_code(monkeypatch):
-    from control_plane.routers import tasks as tasks_mod
     from agentcore.models import AgentConfig, ShimMcpServer
+    from control_plane.routers import tasks as tasks_mod
 
     monkeypatch.setattr(
         tasks_mod,

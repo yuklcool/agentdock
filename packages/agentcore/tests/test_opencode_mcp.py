@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agentcore.drivers.opencode import opencode_config_path, write_opencode_mcp, workspace_xdg
+from agentcore.drivers.opencode import opencode_config_path, workspace_xdg, write_opencode_mcp
 from agentcore.models import ShimMcpServer
 
 pytestmark = pytest.mark.unit

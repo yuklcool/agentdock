@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import pytest
 
+from control_plane.model_catalog import build_catalog_entries, methods_from_credential_rows
+
 pytestmark = pytest.mark.unit
 
-from control_plane.model_catalog import build_catalog_entries, methods_from_credential_rows
 
 
 def test_classifies_free_anthropic_openai_subscription() -> None:
@@ -46,7 +47,9 @@ def test_label_is_derived_from_id() -> None:
 
 def test_unknown_provider_ignored() -> None:
     # Providers we don't support (no credential method) are dropped.
-    ids = [e["id"] for e in build_catalog_entries(["mystery/foo-1", "anthropic/claude-opus-4-8"], [])]
+    ids = [
+        e["id"] for e in build_catalog_entries(["mystery/foo-1", "anthropic/claude-opus-4-8"], [])
+    ]
     assert "claude-opus-4-8" in ids
     assert "foo-1" not in ids and "mystery/foo-1" not in ids
 
@@ -99,6 +102,7 @@ def test_methods_includes_anthropic_subscription():
 
 def test_methods_excludes_inactive_anthropic_subscription():
     from control_plane.model_catalog import methods_from_credential_rows
+
     rows = [{"provider": "anthropic", "auth_method": "oauth_subscription", "status": "inactive"}]
     assert "anthropic_subscription" not in methods_from_credential_rows(rows)
 
@@ -116,9 +120,7 @@ def test_go_ids_classified_as_opencode_api_key() -> None:
 
 
 def test_paid_zen_requires_opencode_key_free_zen_stays_keyless() -> None:
-    entries = build_catalog_entries(
-        ["opencode/deepseek-v4-flash-free", "opencode/kimi-k2"], []
-    )
+    entries = build_catalog_entries(["opencode/deepseek-v4-flash-free", "opencode/kimi-k2"], [])
     by_id = {e["id"]: e for e in entries}
     free = by_id["opencode/deepseek-v4-flash-free"]
     assert free["category"] == "free"
@@ -168,8 +170,9 @@ def test_openai_subscription_only_models_excluded_from_vanilla():
 
 
 def test_opencode_go_models_gain_vanilla():
-    entries = build_catalog_entries([], [], go_ids=["opencode-go/glm-5.2",
-                                                    "opencode-go/qwen3.7-max"])
+    entries = build_catalog_entries(
+        [], [], go_ids=["opencode-go/glm-5.2", "opencode-go/qwen3.7-max"]
+    )
     for mid in ("opencode-go/glm-5.2", "opencode-go/qwen3.7-max"):
         e = next(m for m in entries if m["id"] == mid)
         assert e["drivers"] == ["opencode", "vanilla", "api"]
@@ -184,5 +187,6 @@ def test_paid_zen_models_do_not_gain_vanilla():
 
 def test_vanilla_subscription_support_stays_empty():
     from control_plane.model_catalog import driver_can_use_subscription
+
     assert not driver_can_use_subscription("vanilla", "openai")
     assert not driver_can_use_subscription("vanilla", "anthropic")

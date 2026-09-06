@@ -43,6 +43,7 @@ export type ContainerStatus =
   | "archiving" | "archived" | "recovering" | "error" | "destroying" | "deleting" | "destroyed";
 
 export interface Container {
+  owner_user_id?: string | null;
   id: string; name: string; external_id: string | null; status: ContainerStatus;
   image_variant: "full" | "slim"; image_tag: string; config: AgentConfig;
   metadata: Record<string, unknown>; last_task_at: string | null;

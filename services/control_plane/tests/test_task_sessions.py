@@ -3,6 +3,7 @@
 Mirrors the fake-session pattern in test_task_submit_admission.py: no real DB
 or docker, just a fake AsyncSession matching on SQL text substrings.
 """
+
 from __future__ import annotations
 
 import base64
@@ -96,8 +97,13 @@ class _FakeMappingsResult:
 
     def first(self) -> dict:  # type: ignore[type-arg]
         return {
-            "provider": "anthropic", "auth_method": "api_key", "status": "active",
-            "token_expires_at": None, "ciphertext": _FAKE_CIPHERTEXT, "iv": "", "tag": "",
+            "provider": "anthropic",
+            "auth_method": "api_key",
+            "status": "active",
+            "token_expires_at": None,
+            "ciphertext": _FAKE_CIPHERTEXT,
+            "iv": "",
+            "tag": "",
         }
 
     def all(self) -> list:  # type: ignore[type-arg]
@@ -152,7 +158,9 @@ def app_client_factory(monkeypatch: pytest.MonkeyPatch):
 
     captured: dict[str, Any] = {}
 
-    async def fake_forward(request: Any, row: Any, shim_req: Any, session: Any, task_id: str) -> dict:
+    async def fake_forward(
+        request: Any, row: Any, shim_req: Any, session: Any, task_id: str
+    ) -> dict:
         captured["shim_req"] = shim_req
         return {"status": "running"}
 
@@ -286,9 +294,11 @@ async def test_list_sessions_groups_by_session_id():
             if "containers" in s and "tenant_id" in s and "count" not in s:
                 return _FakeResult(value=_FakeContainerRow())
             if "group by" in s and "session_id" in s:
+
                 class _R:
                     def all(self_inner):
                         return [_Row()]
+
                 return _R()
             return await super().execute(stmt, params)
 
@@ -308,9 +318,13 @@ async def test_list_sessions_groups_by_session_id():
 
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["sessions"] == [{
-        "session_id": "sess-1", "driver": "vanilla", "task_count": 3,
-        "first_created_at": "2026-07-01T00:00:00+00:00",
-        "last_created_at": "2026-07-02T00:00:00+00:00",
-        "busy": False,
-    }]
+    assert body["sessions"] == [
+        {
+            "session_id": "sess-1",
+            "driver": "vanilla",
+            "task_count": 3,
+            "first_created_at": "2026-07-01T00:00:00+00:00",
+            "last_created_at": "2026-07-02T00:00:00+00:00",
+            "busy": False,
+        }
+    ]

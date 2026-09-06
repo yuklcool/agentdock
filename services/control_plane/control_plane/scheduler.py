@@ -119,6 +119,12 @@ async def _submit_due_schedule(
     last_run_ref: str | None = None
 
     try:
+        from control_plane.access import actor_principal, bind_principal
+
+        bind_principal(session, await actor_principal(
+            session, row.tenant_id, getattr(row, "run_as_user_id", None),
+            getattr(row, "run_as_role", "member"),
+        ))
         if kind == "prompt":
             prompt_row = await _load_prompt_row(session, row.tenant_id, target["prompt_id"])
             if prompt_row is None:

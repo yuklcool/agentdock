@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
+
 import pytest
-from control_plane.workflow_engine import terminal_action, is_stuck, STEP_NULL_GRACE_SECONDS
+
+from control_plane.workflow_engine import STEP_NULL_GRACE_SECONDS, is_stuck, terminal_action
 
 pytestmark = pytest.mark.unit
 

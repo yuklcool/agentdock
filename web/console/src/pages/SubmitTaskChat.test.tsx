@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -47,6 +47,8 @@ function setup() {
   })));
 }
 
+afterEach(() => vi.restoreAllMocks());
+
 describe("SubmitTask chat layout", () => {
   beforeEach(() => { localStorage.clear(); });
 
@@ -90,15 +92,16 @@ describe("SubmitTask chat layout", () => {
       { seq: 1, type: "assistant_message", ts: "t", payload: { content: [{ type: "text", text: params.tid === "tsk_b" ? "The second answer, long enough that the thread keeps growing as it loads" : "The first answer, also long enough to grow the thread height after the initial render" }] } },
     ] })));
 
+    // Install layout geometry before the first render so loaded-cache timing
+    // cannot make the initial scroll happen against jsdom's zero dimensions.
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return 100 + (this.textContent?.length ?? 0) * 2;
+    });
     renderWithProviders(<AuthProvider><SubmitTask /></AuthProvider>);
     await userEvent.click(await screen.findByRole("button", { name: /chat/i }));
 
     const thread = document.querySelector(".chat-thread") as HTMLElement;
-    // jsdom has no layout — model scroll height by content so it grows as the
-    // async transcripts render in (the real-world cause of the stuck scroll).
-    Object.defineProperty(thread, "clientHeight", { configurable: true, get: () => 300 });
-    Object.defineProperty(thread, "scrollHeight", { configurable: true, get: () => 100 + (thread.textContent?.length ?? 0) * 2 });
-
     await screen.findByText(/The first answer/);
     await screen.findByText(/The second answer/);
 

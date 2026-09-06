@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.websockets import WebSocketDisconnect
 
 from agentcore.models import TaskBody
+from control_plane.access import bind_principal
 from control_plane.auth.principal import Principal
 from control_plane.errors import APIError
 from control_plane.routers.console import _origin_ok, _principal_ws
@@ -140,6 +141,7 @@ async def nanobot_chat(
             subscriptions = {k: v for k, v in subscriptions.items() if not v.done()}
             try:
                 async with state.session_factory() as session:
+                    bind_principal(session, principal)
                     crow = await _load_owned_container(session, tenant_id, frame.agent_id)
                     if crow.config.get("driver") != "nanobot":
                         await send({"event": "error", "code": "nanobot_agent_required"})
