@@ -1,10 +1,10 @@
 # AgentDock 运维指南
 
-AgentDock 按用户提供独立 Nanobot 实例，使用 PostgreSQL 保存归属、任务和会话映射，使用独立 Docker Volume 保存工作区及 Nanobot 原生历史。运行镜像固定 Nanobot 提交，不需要修改 Nanobot 源码。
+AgentDock 按用户提供独立 Nanobot 实例，使用 PostgreSQL 保存归属、任务和会话映射，使用独立 Docker Volume 保存工作区及 Nanobot 原生历史。运行镜像固定用户提供的 Nanobot 基础镜像摘要，不修改其中的 Nanobot 源码。
 
 ## 升级与用户隔离
 
-先备份，再执行 `alembic upgrade head`，最后更新控制平面和控制台。新增迁移 `0029_private_instances` 与 `0030_task_admission` 保存实例归属、个人密钥、模板绑定和任务执行身份。运行镜像仍使用 `0.1.0-nanobot`。
+先备份，再执行 `alembic upgrade head`，最后更新控制平面和控制台。新增迁移 `0029_private_instances` 与 `0030_task_admission` 保存实例归属、个人密钥、模板绑定和任务执行身份。运行镜像更新为 `0.2.0-nanobot`，复用阿里云的 Nanobot 0.3.0 / Node 24 镜像。先 `make image` 构建平台运行层，确认 `AGENT_IMAGE_TAG=0.2.0-nanobot`，再通过镜像更新流程重建旧运行容器并保留 Volume。仅修改环境变量不会更新现有容器。
 
 用户登录后，在模板页选择已配置模型的 Nanobot 模板，点击“打开我的智能体”。同一工作空间、用户、模板重复打开会返回同一实例；数据库唯一约束和创建租约处理重复点击与并发请求。暂停或归档的实例会恢复。处于错误状态的实例需要先恢复或删除，再重试创建。
 

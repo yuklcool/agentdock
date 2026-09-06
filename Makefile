@@ -1,4 +1,4 @@
-VERSION    ?= 0.1.0-nanobot
+VERSION    ?= 0.2.0-nanobot
 REGISTRY   ?=
 IMAGE      := $(REGISTRY)agent-runtime
 

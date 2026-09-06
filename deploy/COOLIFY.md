@@ -2,7 +2,7 @@
 
 ## Prerequisites
 - Registry resource deployed (deploy/registry/) and reachable at https://registry.example.com.
-- Agent image pushed multi-arch: `registry.example.com/agent-runtime:<AGENT_IMAGE_TAG>`.
+- Agent image built for the validated `linux/amd64` platform and pushed: `registry.example.com/agent-runtime:<AGENT_IMAGE_TAG>`.
 - Control-plane env has `AGENT_REGISTRY` + `AGENT_REGISTRY_USERNAME` + `AGENT_REGISTRY_PASSWORD`
   (the control plane pulls the private image with these — no host `docker login` needed; see Task 6).
 - Provisioning pulls: `AGENT_IMAGE_PULL_POLICY=if-not-present` (default) makes creates
