@@ -144,6 +144,19 @@ async def test_streams_wait_for_turn_end_and_ignore_other_chats(tmp_path):
     await run_peer(tmp_path, Peer(), check)
 
 
+def test_ssrf_exceptions_are_host_owned(monkeypatch):
+    monkeypatch.delenv("AGENTDOCK_NANOBOT_SSRF_WHITELIST", raising=False)
+    env = {"AGENTDOCK_NANOBOT_SSRF_WHITELIST": "0.0.0.0/0"}
+    native = runtime_config(CONFIG, LIMITS, "secret", "/workspace", "token", [], env)
+    assert native["tools"]["ssrfWhitelist"] == []
+    monkeypatch.setenv("AGENTDOCK_NANOBOT_SSRF_WHITELIST", "10.0.0.7/32 ::1/128")
+    native = runtime_config(CONFIG, LIMITS, "secret", "/workspace", "token", [], env)
+    assert native["tools"]["ssrfWhitelist"] == ["10.0.0.7/32", "::1/128"]
+    monkeypatch.setenv("AGENTDOCK_NANOBOT_SSRF_WHITELIST", "bad-secret-input")
+    with pytest.raises(NanobotError, match="^nanobot_invalid_ssrf_whitelist$"):
+        runtime_config(CONFIG, LIMITS, "secret", "/workspace", "token", [], env)
+
+
 async def test_sessions_survive_new_driver_and_are_distinct(tmp_path):
     peer = Peer()
 

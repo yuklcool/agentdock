@@ -86,8 +86,12 @@ async def test_run_success_returns_result_text(monkeypatch, tmp_path):
     from agentcore.drivers.claude_code import ClaudeCodeDriver
 
     result = await ClaudeCodeDriver().run(
-        task=TaskBody(prompt="hi"), config=cfg(), limits=LIMITS,
-        credential="sk-ant-1", emit=emit, cancel=asyncio.Event(),
+        task=TaskBody(prompt="hi"),
+        config=cfg(),
+        limits=LIMITS,
+        credential="sk-ant-1",
+        emit=emit,
+        cancel=asyncio.Event(),
         workspace=str(tmp_path),
     )
 
@@ -100,8 +104,7 @@ async def test_run_success_returns_result_text(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_run_error_result_fails(monkeypatch, tmp_path):
     lines = [
-        '{"type":"result","subtype":"error_during_execution","is_error":true,'
-        '"result":"kaboom"}\n',
+        '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"kaboom"}\n',
     ]
     proc = FakeProc(lines, returncode=1)
     patch_proc(monkeypatch, proc)
@@ -110,8 +113,12 @@ async def test_run_error_result_fails(monkeypatch, tmp_path):
     from agentcore.drivers.claude_code import ClaudeCodeDriver
 
     result = await ClaudeCodeDriver().run(
-        task=TaskBody(prompt="hi"), config=cfg(), limits=LIMITS,
-        credential="sk-ant-1", emit=emit, cancel=asyncio.Event(),
+        task=TaskBody(prompt="hi"),
+        config=cfg(),
+        limits=LIMITS,
+        credential="sk-ant-1",
+        emit=emit,
+        cancel=asyncio.Event(),
         workspace=str(tmp_path),
     )
 
@@ -130,8 +137,12 @@ async def test_run_cancellation(monkeypatch, tmp_path):
     from agentcore.drivers.claude_code import ClaudeCodeDriver
 
     result = await ClaudeCodeDriver().run(
-        task=TaskBody(prompt="hi"), config=cfg(), limits=LIMITS,
-        credential="k", emit=emit, cancel=cancel,
+        task=TaskBody(prompt="hi"),
+        config=cfg(),
+        limits=LIMITS,
+        credential="k",
+        emit=emit,
+        cancel=cancel,
         workspace=str(tmp_path),
     )
 
@@ -152,8 +163,12 @@ async def test_run_timeout(monkeypatch, tmp_path):
     from agentcore.drivers.claude_code import ClaudeCodeDriver
 
     result = await ClaudeCodeDriver().run(
-        task=TaskBody(prompt="hi"), config=cfg(), limits=limits,
-        credential="k", emit=emit, cancel=asyncio.Event(),
+        task=TaskBody(prompt="hi"),
+        config=cfg(),
+        limits=limits,
+        credential="k",
+        emit=emit,
+        cancel=asyncio.Event(),
         workspace=str(tmp_path),
     )
 
@@ -167,8 +182,7 @@ async def test_run_rc0_error_result_fails(monkeypatch, tmp_path):
     # rc=0 but the result event reports is_error=True — isolates the
     # `error_msg is None` success guard (rc alone would say success).
     lines = [
-        '{"type":"result","subtype":"error_during_execution","is_error":true,'
-        '"result":"kaboom"}\n',
+        '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"kaboom"}\n',
     ]
     proc = FakeProc(lines, returncode=0)
     patch_proc(monkeypatch, proc)
@@ -177,8 +191,12 @@ async def test_run_rc0_error_result_fails(monkeypatch, tmp_path):
     from agentcore.drivers.claude_code import ClaudeCodeDriver
 
     result = await ClaudeCodeDriver().run(
-        task=TaskBody(prompt="hi"), config=cfg(), limits=LIMITS,
-        credential="k", emit=emit, cancel=asyncio.Event(),
+        task=TaskBody(prompt="hi"),
+        config=cfg(),
+        limits=LIMITS,
+        credential="k",
+        emit=emit,
+        cancel=asyncio.Event(),
         workspace=str(tmp_path),
     )
 
@@ -198,8 +216,12 @@ async def test_run_missing_binary(monkeypatch, tmp_path):
     from agentcore.drivers.claude_code import ClaudeCodeDriver
 
     result = await ClaudeCodeDriver().run(
-        task=TaskBody(prompt="hi"), config=cfg(), limits=LIMITS,
-        credential="k", emit=emit, cancel=asyncio.Event(),
+        task=TaskBody(prompt="hi"),
+        config=cfg(),
+        limits=LIMITS,
+        credential="k",
+        emit=emit,
+        cancel=asyncio.Event(),
         workspace=str(tmp_path),
     )
 
@@ -233,10 +255,12 @@ async def test_run_materializes_skills_and_mcp(monkeypatch, tmp_path):
 
     async def fake_spawn(argv, *, cwd, env, **kwargs):
         captured["argv"] = argv
-        return FakeProc([
-            b'{"type":"result","subtype":"success","result":"ok","is_error":false,'
-            b'"usage":{"input_tokens":1,"output_tokens":1}}\n',
-        ])
+        return FakeProc(
+            [
+                b'{"type":"result","subtype":"success","result":"ok","is_error":false,'
+                b'"usage":{"input_tokens":1,"output_tokens":1}}\n',
+            ]
+        )
 
     monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
     monkeypatch.setattr("agentcore.sandbox.ensure_agent_dir", lambda *a, **k: None)
@@ -248,16 +272,27 @@ async def test_run_materializes_skills_and_mcp(monkeypatch, tmp_path):
         pass
 
     result = await claude_code.ClaudeCodeDriver().run(
-        task=TaskBody(prompt="hi"), config=_cfg(), limits=_limits(),
-        credential="k", emit=_emit, cancel=asyncio.Event(), workspace=ws,
+        task=TaskBody(prompt="hi"),
+        config=_cfg(),
+        limits=_limits(),
+        credential="k",
+        emit=_emit,
+        cancel=asyncio.Event(),
+        workspace=ws,
         skills=[ShimSkill(name="demo", description="d", body="hello")],
         mcp_servers=[ShimMcpServer(name="gh", url="https://x", auth_type="none")],
     )
     assert result.success is True
     # skill written under the discovery dir
     skill_md = (
-        tmp_path / "ws" / ".agent-state" / "claude-code" / ".claude"
-        / "skills" / "demo" / "SKILL.md"
+        tmp_path
+        / "ws"
+        / ".agent-state"
+        / "claude-code"
+        / ".claude"
+        / "skills"
+        / "demo"
+        / "SKILL.md"
     )
     assert skill_md.exists()
     # mcp config written and passed to claude
@@ -279,17 +314,17 @@ async def test_run_uses_makedirs_agent_for_skills_dir(monkeypatch, tmp_path):
     from agentcore.drivers import claude_code
 
     calls: list[str] = []
-    monkeypatch.setattr(
-        "agentcore.sandbox.makedirs_agent", lambda p, *a, **k: calls.append(p)
-    )
+    monkeypatch.setattr("agentcore.sandbox.makedirs_agent", lambda p, *a, **k: calls.append(p))
     monkeypatch.setattr("agentcore.sandbox.ensure_agent_dir", lambda *a, **k: None)
     monkeypatch.setattr("agentcore.sandbox.chown_to_agent", lambda *a, **k: None)
 
     async def fake_spawn(argv, *, cwd, env, **kwargs):
-        return FakeProc([
-            b'{"type":"result","subtype":"success","result":"ok","is_error":false,'
-            b'"usage":{"input_tokens":1,"output_tokens":1}}\n',
-        ])
+        return FakeProc(
+            [
+                b'{"type":"result","subtype":"success","result":"ok","is_error":false,'
+                b'"usage":{"input_tokens":1,"output_tokens":1}}\n',
+            ]
+        )
 
     monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
 
@@ -298,8 +333,13 @@ async def test_run_uses_makedirs_agent_for_skills_dir(monkeypatch, tmp_path):
 
     ws = str(tmp_path / "ws")
     await claude_code.ClaudeCodeDriver().run(
-        task=TaskBody(prompt="hi"), config=_cfg(), limits=_limits(),
-        credential="k", emit=_emit, cancel=asyncio.Event(), workspace=ws,
+        task=TaskBody(prompt="hi"),
+        config=_cfg(),
+        limits=_limits(),
+        credential="k",
+        emit=_emit,
+        cancel=asyncio.Event(),
+        workspace=ws,
     )
 
     assert calls == [claude_code.skills_dir(ws)]
@@ -313,10 +353,12 @@ async def test_run_no_mcp_flag_when_no_servers(monkeypatch, tmp_path):
 
     async def fake_spawn(argv, *, cwd, env, **kwargs):
         captured["argv"] = argv
-        return FakeProc([
-            b'{"type":"result","subtype":"success","result":"ok","is_error":false,'
-            b'"usage":{"input_tokens":1,"output_tokens":1}}\n',
-        ])
+        return FakeProc(
+            [
+                b'{"type":"result","subtype":"success","result":"ok","is_error":false,'
+                b'"usage":{"input_tokens":1,"output_tokens":1}}\n',
+            ]
+        )
 
     monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
     monkeypatch.setattr("agentcore.sandbox.ensure_agent_dir", lambda *a, **k: None)
@@ -326,8 +368,12 @@ async def test_run_no_mcp_flag_when_no_servers(monkeypatch, tmp_path):
         pass
 
     await claude_code.ClaudeCodeDriver().run(
-        task=TaskBody(prompt="hi"), config=_cfg(), limits=_limits(),
-        credential="k", emit=_emit, cancel=asyncio.Event(),
+        task=TaskBody(prompt="hi"),
+        config=_cfg(),
+        limits=_limits(),
+        credential="k",
+        emit=_emit,
+        cancel=asyncio.Event(),
         workspace=str(tmp_path / "ws2"),
     )
     assert "--mcp-config" not in captured["argv"]
@@ -340,10 +386,13 @@ async def test_run_skills_error_is_best_effort(monkeypatch, tmp_path):
     from agentcore.models import ShimSkill
 
     async def fake_spawn(argv, *, cwd, env, **kwargs):
-        return FakeProc([
-            b'{"type":"result","subtype":"success","result":"ok","is_error":false,'
-            b'"usage":{"input_tokens":1,"output_tokens":1}}\n',
-        ])
+        return FakeProc(
+            [
+                b'{"type":"result","subtype":"success","result":"ok","is_error":false,'
+                b'"usage":{"input_tokens":1,"output_tokens":1}}\n',
+            ]
+        )
+
     monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
     monkeypatch.setattr("agentcore.sandbox.ensure_agent_dir", lambda *a, **k: None)
     monkeypatch.setattr("agentcore.sandbox.chown_to_agent", lambda *a, **k: None)
@@ -352,11 +401,17 @@ async def test_run_skills_error_is_best_effort(monkeypatch, tmp_path):
         lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
     )
     events = []
-    async def _emit(t, p): events.append((t, p))
+
+    async def _emit(t, p):
+        events.append((t, p))
 
     result = await claude_code.ClaudeCodeDriver().run(
-        task=TaskBody(prompt="hi"), config=_cfg(), limits=_limits(),
-        credential="k", emit=_emit, cancel=asyncio.Event(),
+        task=TaskBody(prompt="hi"),
+        config=_cfg(),
+        limits=_limits(),
+        credential="k",
+        emit=_emit,
+        cancel=asyncio.Event(),
         workspace=str(tmp_path / "ws3"),
         skills=[ShimSkill(name="demo", description="d", body="hello")],
     )
@@ -371,12 +426,16 @@ async def test_run_mcp_error_is_best_effort(monkeypatch, tmp_path):
     from agentcore.models import ShimMcpServer
 
     captured: dict = {}
+
     async def fake_spawn(argv, *, cwd, env, **kwargs):
         captured["argv"] = argv
-        return FakeProc([
-            b'{"type":"result","subtype":"success","result":"ok","is_error":false,'
-            b'"usage":{"input_tokens":1,"output_tokens":1}}\n',
-        ])
+        return FakeProc(
+            [
+                b'{"type":"result","subtype":"success","result":"ok","is_error":false,'
+                b'"usage":{"input_tokens":1,"output_tokens":1}}\n',
+            ]
+        )
+
     monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
     monkeypatch.setattr("agentcore.sandbox.ensure_agent_dir", lambda *a, **k: None)
     monkeypatch.setattr("agentcore.sandbox.chown_to_agent", lambda *a, **k: None)
@@ -385,11 +444,17 @@ async def test_run_mcp_error_is_best_effort(monkeypatch, tmp_path):
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("render failed")),
     )
     events = []
-    async def _emit(t, p): events.append((t, p))
+
+    async def _emit(t, p):
+        events.append((t, p))
 
     result = await claude_code.ClaudeCodeDriver().run(
-        task=TaskBody(prompt="hi"), config=_cfg(), limits=_limits(),
-        credential="k", emit=_emit, cancel=asyncio.Event(),
+        task=TaskBody(prompt="hi"),
+        config=_cfg(),
+        limits=_limits(),
+        credential="k",
+        emit=_emit,
+        cancel=asyncio.Event(),
         workspace=str(tmp_path / "ws4"),
         mcp_servers=[ShimMcpServer(name="gh", url="https://x", auth_type="none")],
     )
@@ -412,13 +477,20 @@ async def test_claude_session_first_turn_writes_state_file(monkeypatch, tmp_path
     driver = ClaudeCodeDriver()
     events, emit = collector()
     result = await driver.run(
-        task=TaskBody(prompt="hello"), config=cfg(), limits=LIMITS,
-        credential="cred", emit=emit, cancel=asyncio.Event(),
-        workspace=str(tmp_path), session_id="sess-1", session_is_continuation=False,
+        task=TaskBody(prompt="hello"),
+        config=cfg(),
+        limits=LIMITS,
+        credential="cred",
+        emit=emit,
+        cancel=asyncio.Event(),
+        workspace=str(tmp_path),
+        session_id="sess-1",
+        session_is_continuation=False,
     )
 
     assert result.success is True
     from agentcore.drivers.session_state import read_session_state
+
     assert read_session_state(str(tmp_path), "claude-code", "sess-1") == {
         "claude_session_id": "claude-sess-1"
     }
@@ -429,15 +501,19 @@ async def test_claude_session_continuation_passes_resume_flag(monkeypatch, tmp_p
     from agentcore.drivers.claude_code import ClaudeCodeDriver
     from agentcore.drivers.session_state import write_session_state
 
-    write_session_state(str(tmp_path), "claude-code", "sess-2", {"claude_session_id": "claude-sess-1"})
+    write_session_state(
+        str(tmp_path), "claude-code", "sess-2", {"claude_session_id": "claude-sess-1"}
+    )
 
     captured_cmd = {}
 
     async def fake_spawn(argv, *, cwd, env, **kwargs):
         captured_cmd["argv"] = argv
         proc = FakeProc(
-            ['{"type":"result","subtype":"success","result":"ok","session_id":"claude-sess-1",'
-             '"usage":{"input_tokens":1,"output_tokens":1}}'],
+            [
+                '{"type":"result","subtype":"success","result":"ok","session_id":"claude-sess-1",'
+                '"usage":{"input_tokens":1,"output_tokens":1}}'
+            ],
             returncode=0,
         )
         return proc
@@ -448,9 +524,15 @@ async def test_claude_session_continuation_passes_resume_flag(monkeypatch, tmp_p
     driver = ClaudeCodeDriver()
     events, emit = collector()
     result = await driver.run(
-        task=TaskBody(prompt="continue"), config=cfg(), limits=LIMITS,
-        credential="cred", emit=emit, cancel=asyncio.Event(),
-        workspace=str(tmp_path), session_id="sess-2", session_is_continuation=True,
+        task=TaskBody(prompt="continue"),
+        config=cfg(),
+        limits=LIMITS,
+        credential="cred",
+        emit=emit,
+        cancel=asyncio.Event(),
+        workspace=str(tmp_path),
+        session_id="sess-2",
+        session_is_continuation=True,
     )
 
     assert result.success is True
@@ -465,9 +547,15 @@ async def test_claude_session_missing_state_fails_fast(tmp_path):
     driver = ClaudeCodeDriver()
     events, emit = collector()
     result = await driver.run(
-        task=TaskBody(prompt="hi"), config=cfg(), limits=LIMITS,
-        credential="cred", emit=emit, cancel=asyncio.Event(),
-        workspace=str(tmp_path), session_id="sess-missing", session_is_continuation=True,
+        task=TaskBody(prompt="hi"),
+        config=cfg(),
+        limits=LIMITS,
+        credential="cred",
+        emit=emit,
+        cancel=asyncio.Event(),
+        workspace=str(tmp_path),
+        session_id="sess-missing",
+        session_is_continuation=True,
     )
 
     assert result.success is False
@@ -486,7 +574,9 @@ async def test_claude_no_session_id_unchanged(monkeypatch, tmp_path):
     async def fake_spawn(argv, *, cwd, env, **kwargs):
         captured_cmd["argv"] = argv
         return FakeProc(
-            ['{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":1,"output_tokens":1}}'],
+            [
+                '{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":1,"output_tokens":1}}'
+            ],
             returncode=0,
         )
 
@@ -496,8 +586,13 @@ async def test_claude_no_session_id_unchanged(monkeypatch, tmp_path):
     driver = ClaudeCodeDriver()
     events, emit = collector()
     result = await driver.run(
-        task=TaskBody(prompt="hi"), config=cfg(), limits=LIMITS,
-        credential="cred", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
+        task=TaskBody(prompt="hi"),
+        config=cfg(),
+        limits=LIMITS,
+        credential="cred",
+        emit=emit,
+        cancel=asyncio.Event(),
+        workspace=str(tmp_path),
     )
 
     assert result.success is True
@@ -520,12 +615,18 @@ async def test_run_passes_configured_system_prompt_flag(monkeypatch, tmp_path):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     events, emit = collector()
     config = AgentConfig(
-        driver="claude-code", model="claude-opus-4-8",
+        driver="claude-code",
+        model="claude-opus-4-8",
         system_prompt="Answer tersely.",
     )
     await ClaudeCodeDriver().run(
-        task=TaskBody(prompt="x"), config=config, limits=LIMITS,
-        credential="sk", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
+        task=TaskBody(prompt="x"),
+        config=config,
+        limits=LIMITS,
+        credential="sk",
+        emit=emit,
+        cancel=asyncio.Event(),
+        workspace=str(tmp_path),
     )
     args = list(captured["args"])
     i = args.index("--append-system-prompt")
@@ -569,8 +670,13 @@ def structured_task():
 def claude_result_line(*, result="", structured=None, session_id="s1"):
     import json as _json
 
-    ev = {"type": "result", "subtype": "success", "is_error": False,
-          "result": result, "session_id": session_id}
+    ev = {
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "result": result,
+        "session_id": session_id,
+    }
     if structured is not None:
         ev["structured_output"] = structured
     return _json.dumps(ev) + "\n"
@@ -580,14 +686,18 @@ def claude_result_line(*, result="", structured=None, session_id="s1"):
 async def test_structured_prefers_structured_output_field(monkeypatch, tmp_path):
     from agentcore.drivers.claude_code import ClaudeCodeDriver
 
-    proc = FakeProc([claude_result_line(result='{"answer": "42"}',
-                                        structured={"answer": "42"})])
+    proc = FakeProc([claude_result_line(result='{"answer": "42"}', structured={"answer": "42"})])
     calls = patch_procs(monkeypatch, [proc])
     events, emit = collector()
 
     result = await ClaudeCodeDriver().run(
-        task=structured_task(), config=cfg(), limits=LIMITS, credential="k",
-        emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
+        task=structured_task(),
+        config=cfg(),
+        limits=LIMITS,
+        credential="k",
+        emit=emit,
+        cancel=asyncio.Event(),
+        workspace=str(tmp_path),
     )
 
     assert result.success is True
@@ -608,8 +718,13 @@ async def test_structured_falls_back_to_text_parse(monkeypatch, tmp_path):
     _, emit = collector()
 
     result = await ClaudeCodeDriver().run(
-        task=structured_task(), config=cfg(), limits=LIMITS, credential="k",
-        emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
+        task=structured_task(),
+        config=cfg(),
+        limits=LIMITS,
+        credential="k",
+        emit=emit,
+        cancel=asyncio.Event(),
+        workspace=str(tmp_path),
     )
     assert result.output == {"answer": "42"}
 
@@ -624,8 +739,13 @@ async def test_structured_retries_via_session_resume(monkeypatch, tmp_path):
     events, emit = collector()
 
     result = await ClaudeCodeDriver().run(
-        task=structured_task(), config=cfg(), limits=LIMITS, credential="k",
-        emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
+        task=structured_task(),
+        config=cfg(),
+        limits=LIMITS,
+        credential="k",
+        emit=emit,
+        cancel=asyncio.Event(),
+        workspace=str(tmp_path),
     )
 
     assert result.success is True
@@ -646,8 +766,13 @@ async def test_structured_fails_after_max_attempts(monkeypatch, tmp_path):
     events, emit = collector()
 
     result = await ClaudeCodeDriver().run(
-        task=structured_task(), config=cfg(), limits=LIMITS, credential="k",
-        emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
+        task=structured_task(),
+        config=cfg(),
+        limits=LIMITS,
+        credential="k",
+        emit=emit,
+        cancel=asyncio.Event(),
+        workspace=str(tmp_path),
     )
     assert result.success is False
     assert result.reason == "invalid_structured_output"

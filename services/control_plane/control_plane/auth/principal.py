@@ -21,11 +21,12 @@ SESSION_COOKIE = "agent_session"
 
 @dataclass(frozen=True)
 class Principal:
-    tenant_id: str | None       # the ACTIVE tenant for this request (None for staff/limbo)
-    role: Role                  # role WITHIN the active tenant
+    tenant_id: str | None  # the ACTIVE tenant for this request (None for staff/limbo)
+    role: Role  # role WITHIN the active tenant
     is_staff: bool
-    user_id: str | None         # None for API keys and bootstrap key
-    available_tenant_ids: tuple[str, ...] = ()   # tenants this user may switch to
+    user_id: str | None  # None for API keys and bootstrap key
+    available_tenant_ids: tuple[str, ...] = ()  # tenants this user may switch to
+    auth_method: Literal["session", "api_key", "bootstrap"] = "session"
 
 
 def actor_type_for(principal: Principal) -> str:
@@ -56,11 +57,13 @@ async def resolve_from_inputs(
     at = at or datetime.now(UTC)
     bearer: str | None = None
     if authorization and authorization.startswith("Bearer "):
-        bearer = authorization[len("Bearer "):].strip()
+        bearer = authorization[len("Bearer ") :].strip()
 
     # 1. Bootstrap admin key (break-glass, staff). Constant-time compare.
     if bearer and admin_api_key_env and secrets.compare_digest(bearer, admin_api_key_env):
-        return Principal(tenant_id=None, role="member", is_staff=True, user_id=None)
+        return Principal(
+            tenant_id=None, role="member", is_staff=True, user_id=None, auth_method="bootstrap"
+        )
 
     # 2. Tenant API key → member capability.
     if bearer and bearer.startswith("tk_live_"):
@@ -68,9 +71,24 @@ async def resolve_from_inputs(
         candidates = await repo.get_active_api_keys_by_prefix(prefix)
         for row in candidates:
             if verify_password(bearer, row["key_hash"]):
+                owner = row.get("owner_user_id")
+                if owner is not None:
+                    user = await repo.get_user(owner)
+                    memberships = await repo.get_active_memberships(owner)
+                    if (
+                        not user
+                        or user["status"] != "active"
+                        or not any(m["tenant_id"] == row["tenant_id"] for m in memberships)
+                    ):
+                        return None
                 await repo.touch_api_key(row["id"])
-                return Principal(tenant_id=row["tenant_id"], role="member",
-                                 is_staff=False, user_id=None)
+                return Principal(
+                    tenant_id=row["tenant_id"],
+                    role="member",
+                    is_staff=False,
+                    user_id=owner,
+                    auth_method="api_key",
+                )
         return None  # no matching key found
 
     # 3. Session cookie → user/staff principal.
@@ -90,8 +108,7 @@ async def resolve_from_inputs(
             if active is not None and await repo.tenant_exists(active):
                 # Staff impersonation: scope into the tenant with full access,
                 # but retain staff powers (is_staff stays True).
-                return Principal(tenant_id=active, role="owner", is_staff=True,
-                                 user_id=user["id"])
+                return Principal(tenant_id=active, role="owner", is_staff=True, user_id=user["id"])
             return Principal(tenant_id=None, role="member", is_staff=True, user_id=user["id"])
         memberships = await repo.get_active_memberships(user["id"])
         by_tid = {m["tenant_id"]: m for m in memberships}
@@ -99,16 +116,22 @@ async def resolve_from_inputs(
         active = srow.get("active_tenant_id")
         if active is not None and active in by_tid:
             return Principal(
-                tenant_id=active, role=by_tid[active]["role"], is_staff=False,
-                user_id=user["id"], available_tenant_ids=available,
+                tenant_id=active,
+                role=by_tid[active]["role"],
+                is_staff=False,
+                user_id=user["id"],
+                available_tenant_ids=available,
             )
         # Limbo: no/invalid active tenant. /me and /select-tenant still work. Safety
         # comes from role gates: limbo has role="member"/is_staff=False, so it fails
         # require_admin/require_session_admin/require_staff; tenant-scoped mutations
         # are gated by those. (Some read endpoints additionally filter by tenant_id.)
         return Principal(
-            tenant_id=None, role="member", is_staff=False,
-            user_id=user["id"], available_tenant_ids=available,
+            tenant_id=None,
+            role="member",
+            is_staff=False,
+            user_id=user["id"],
+            available_tenant_ids=available,
         )
 
     return None
@@ -118,13 +141,15 @@ async def resolve_from_inputs(
 # DB-backed repo
 # ---------------------------------------------------------------------------
 
+
 class DbPrincipalRepo:
     def __init__(self, conn: AsyncSession) -> None:
         self._c = conn
 
     async def get_active_api_keys_by_prefix(self, prefix: str) -> list[dict]:  # type: ignore[type-arg]
         q = sa.select(t.api_keys).where(
-            t.api_keys.c.key_prefix == prefix, t.api_keys.c.status == "active")
+            t.api_keys.c.key_prefix == prefix, t.api_keys.c.status == "active"
+        )
         rows = (await self._c.execute(q)).mappings().all()
         return [dict(r) for r in rows]
 
@@ -139,10 +164,14 @@ class DbPrincipalRepo:
         return dict(r) if r else None
 
     async def get_active_memberships(self, user_id: str) -> list[dict]:  # type: ignore[type-arg]
-        q = sa.select(t.memberships.c.tenant_id, t.memberships.c.role).where(
-            t.memberships.c.user_id == user_id,
-            t.memberships.c.status == "active",
-        ).order_by(t.memberships.c.tenant_id)
+        q = (
+            sa.select(t.memberships.c.tenant_id, t.memberships.c.role)
+            .where(
+                t.memberships.c.user_id == user_id,
+                t.memberships.c.status == "active",
+            )
+            .order_by(t.memberships.c.tenant_id)
+        )
         rows = (await self._c.execute(q)).mappings().all()
         return [dict(r) for r in rows]
 
@@ -170,6 +199,7 @@ class DbPrincipalRepo:
 # ---------------------------------------------------------------------------
 # FastAPI dependency
 # ---------------------------------------------------------------------------
+
 
 async def resolve_principal(
     request: Request,
@@ -207,6 +237,7 @@ async def resolve_principal(
 # Role-gate helpers
 # ---------------------------------------------------------------------------
 
+
 def require_admin(principal: Principal = Depends(resolve_principal)) -> Principal:
     """admin or owner within a tenant, or staff. Session-only routes also use
     require_session_admin below where API keys must be rejected."""
@@ -223,7 +254,7 @@ def require_session_admin(principal: Principal = Depends(resolve_principal)) -> 
     are not staff."""
     if principal.is_staff:
         return principal
-    if principal.user_id is None:
+    if principal.user_id is None or principal.auth_method != "session":
         raise api_error(403, "forbidden", "This action requires a user session, not an API key")
     if principal.role in ("admin", "owner"):
         return principal

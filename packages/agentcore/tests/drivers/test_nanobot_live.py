@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -17,7 +18,7 @@ import pytest
 
 from agentcore import sandbox
 from agentcore.drivers.nanobot import NanobotDriver
-from agentcore.models import AgentConfig, ResolvedLimits, TaskBody
+from agentcore.models import AgentConfig, ResolvedLimits, ShimMcpServer, ShimSkill, TaskBody
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("AGENTDOCK_TEST_NANOBOT") != "1" or not shutil.which("nanobot"),
@@ -26,6 +27,8 @@ pytestmark = pytest.mark.skipif(
 
 
 async def test_real_gateway_streaming_history_and_restart(monkeypatch):
+    # A deployment-owned exception for this test's local MCP server only.
+    monkeypatch.setenv("AGENTDOCK_NANOBOT_SSRF_WHITELIST", "127.0.0.1/32")
     for key in (
         "HTTP_PROXY",
         "HTTPS_PROXY",
@@ -47,16 +50,59 @@ async def test_real_gateway_streaming_history_and_restart(monkeypatch):
         monkeypatch.setattr(sandbox, "AGENT_UID", os.getuid())
         monkeypatch.setattr(sandbox, "AGENT_GID", os.getgid())
     received = []
+    mcp_methods = []
 
     async def api(reader, writer):
         try:
             headers = await reader.readuntil(b"\r\n\r\n")
             length = next(
-                int(line.split(b":", 1)[1])
-                for line in headers.split(b"\r\n")
-                if line.lower().startswith(b"content-length:")
+                (
+                    int(line.split(b":", 1)[1])
+                    for line in headers.split(b"\r\n")
+                    if line.lower().startswith(b"content-length:")
+                ),
+                0,
             )
-            body = json.loads(await reader.readexactly(length))
+            body = json.loads(await reader.readexactly(length)) if length else {}
+            if headers.split(b" ", 2)[1] == b"/mcp":
+                assert b"authorization: bearer dock-mcp-test" in headers.lower()
+                method = body.get("method")
+                mcp_methods.append(method)
+                if not length:
+                    writer.write(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n")
+                elif "id" not in body:
+                    writer.write(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n")
+                else:
+                    results = {
+                        "initialize": {
+                            "protocolVersion": body.get("params", {}).get("protocolVersion"),
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "dock", "version": "1"},
+                        },
+                        "tools/list": {
+                            "tools": [
+                                {
+                                    "name": "dock_echo",
+                                    "description": "Echo test",
+                                    "inputSchema": {"type": "object", "properties": {}},
+                                }
+                            ]
+                        },
+                        "tools/call": {"content": [{"type": "text", "text": "dock tool result"}]},
+                        "ping": {},
+                    }
+                    wire = json.dumps(
+                        {"jsonrpc": "2.0", "id": body["id"], "result": results[method]}
+                    ).encode()
+                    writer.write(
+                        (
+                            f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                            f"Content-Length: {len(wire)}\r\nConnection: close\r\n\r\n"
+                        ).encode()
+                        + wire
+                    )
+                await writer.drain()
+                return
             received.append(body)
             response = "AgentDock live answer"
             if body.get("stream"):
@@ -104,13 +150,20 @@ async def test_real_gateway_streaming_history_and_restart(monkeypatch):
                 + wire
             )
             await writer.drain()
+        except asyncio.IncompleteReadError:
+            # Native MCP first probes the TCP port without sending HTTP.
+            pass
         finally:
             writer.close()
             await writer.wait_closed()
 
     server = await asyncio.start_server(api, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    workspace = tempfile.mkdtemp(prefix="agentdock-live-")
+    persistent = os.environ.get("AGENTDOCK_TEST_WORKSPACE")
+    workspace = persistent or tempfile.mkdtemp(prefix="agentdock-live-")
+    Path(workspace).mkdir(exist_ok=True)
+    marker = "DOCK-" + os.environ.get("AGENTDOCK_TEST_INSTANCE", "123")
+    restoring = os.environ.get("AGENTDOCK_TEST_RESTORE") == "1"
     # Production layout: root-owned workspace with sticky bit; agent can write.
     Path(workspace).chmod(0o1777)
     events = []
@@ -127,23 +180,65 @@ async def test_real_gateway_streaming_history_and_restart(monkeypatch):
         cancel=asyncio.Event(),
         workspace=workspace,
         session_id="persistent-session",
+        mcp_servers=[
+            ShimMcpServer(
+                name="dock",
+                url=f"http://127.0.0.1:{port}/mcp",
+                auth_type="bearer",
+                secret="dock-mcp-test",
+            )
+        ],
+        skills=[
+            ShimSkill(
+                name="dock-test",
+                description="AgentDock test skill",
+                body="Remember only this workspace: " + marker,
+            )
+        ],
         env={
             "AGENTDOCK_NANOBOT_API_BASE": f"http://127.0.0.1:{port}/v1",
             "NO_PROXY": "127.0.0.1,localhost",
         },
     )
     try:
-        result = await driver.run(task=TaskBody(prompt="Remember marker DOCK-123"), **args)
+        result = await driver.run(
+            task=TaskBody(prompt="Recall the marker" if restoring else "Remember marker " + marker),
+            session_is_continuation=restoring,
+            **args,
+        )
+        if restoring:
+            assert marker in json.dumps(received[-1]["messages"])
         assert result.success, (result, events)
         assert "AgentDock live answer" in result.output["output"]
         assert any(kind == "assistant_delta" for kind, _ in events)
+        assert "initialize" in mcp_methods and "tools/list" in mcp_methods
+        assert any("dock_echo" in tool["function"]["name"] for tool in received[-1]["tools"])
+        # Separate sessions in the SAME instance must not share chat history.
+        other = {**args, "session_id": "isolated-session", "skills": [], "mcp_servers": []}
+        result = await driver.run(task=TaskBody(prompt="Hello from a separate chat"), **other)
+        assert result.success, result
+        assert marker not in json.dumps(received[-1]["messages"])
+        assert not (Path(workspace) / "nanobot/skills/dock-test").exists()
+        assert not any("dock_echo" in tool["function"]["name"] for tool in received[-1]["tools"])
         await driver.close()
         driver = NanobotDriver()
         result = await driver.run(
             task=TaskBody(prompt="Recall the marker"), session_is_continuation=True, **args
         )
         assert result.success, (result, events)
-        assert any("DOCK-123" in json.dumps(m) for m in received[-1]["messages"])
+        wire = json.dumps(received[-1]["messages"])
+        assert marker in wire
+        assert set(re.findall(r"DOCK-[0-9]+", wire)) == {marker}
+        if persistent and not restoring:
+            (Path(workspace) / "acceptance-ready").touch()
+            async with asyncio.timeout(120):
+                while not (Path(workspace) / "acceptance-resume").exists():  # noqa: ASYNC110 — host process signals via volume
+                    await asyncio.sleep(0.1)
+            result = await driver.run(
+                task=TaskBody(prompt="After Docker pause"), session_is_continuation=True, **args
+            )
+            assert result.success, result
+            assert marker in json.dumps(received[-1]["messages"])
         runtime = driver.runtimes[str(Path(workspace).resolve())]
         assert runtime.process is not None
         # Gateway children use the existing sandbox privilege-drop boundary.
@@ -154,5 +249,6 @@ async def test_real_gateway_streaming_history_and_restart(monkeypatch):
         await driver.close()
         server.close()
         await server.wait_closed()
-        shutil.rmtree(workspace)
+        if not persistent:
+            shutil.rmtree(workspace)
         shutil.rmtree(test_home)

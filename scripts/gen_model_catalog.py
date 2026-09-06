@@ -21,6 +21,7 @@ writes the artifact.
 
 Run on agent-image / opencode / codex bumps:  make models-catalog
 """
+
 from __future__ import annotations
 
 import base64
@@ -78,8 +79,15 @@ def _run_opencode_models(auth: dict) -> list[str]:  # type: ignore[type-arg]
     with tempfile.TemporaryDirectory() as d:
         Path(d, "auth.json").write_text(json.dumps(auth))
         cmd = [
-            "docker", "run", "--rm", "-v", f"{d}/auth.json:/seed/auth.json:ro",
-            "--entrypoint", "sh", _IMAGE, "-c",
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{d}/auth.json:/seed/auth.json:ro",
+            "--entrypoint",
+            "sh",
+            _IMAGE,
+            "-c",
             "mkdir -p /home/agent/opencode && cp /seed/auth.json /home/agent/opencode/auth.json && "
             "HOME=/home/agent XDG_DATA_HOME=/home/agent XDG_CONFIG_HOME=/home/agent/.config "
             "XDG_CACHE_HOME=/home/agent/.cache opencode models",
@@ -99,8 +107,15 @@ def _run_codex_debug_models(auth_path: str) -> list[str]:
     with tempfile.TemporaryDirectory() as d:
         Path(d, "auth.json").write_text(auth)
         cmd = [
-            "docker", "run", "--rm", "-v", f"{d}/auth.json:/seed/auth.json:ro",
-            "--entrypoint", "sh", _IMAGE, "-c",
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{d}/auth.json:/seed/auth.json:ro",
+            "--entrypoint",
+            "sh",
+            _IMAGE,
+            "-c",
             "mkdir -p /home/agent/.codex && cp /seed/auth.json /home/agent/.codex/auth.json && "
             "HOME=/home/agent CODEX_HOME=/home/agent/.codex codex debug models",
         ]

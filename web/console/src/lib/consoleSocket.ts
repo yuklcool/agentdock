@@ -1,7 +1,7 @@
 import { API_BASE } from "../api/base";
 // Dev-only: an explicit ws(s):// origin for the console socket. The vite dev
-// proxy forwards HTTP/SSE but not WebSocket upgrades, so dev points this at the
-// control-plane's published port. Unset in prod → same-origin (through Traefik).
+// proxy also supports WebSocket upgrades; this optional override can point
+// directly at the control plane. Unset in prod → same-origin (through Traefik).
 const CONSOLE_WS_BASE = import.meta.env.VITE_CONSOLE_WS_BASE as string | undefined;
 
 interface Loc {

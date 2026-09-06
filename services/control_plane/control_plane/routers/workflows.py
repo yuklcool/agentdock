@@ -16,6 +16,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from control_plane.access import (
+    bind_principal,
+    session_principal,
+    visible_containers,
+    visible_owner,
+    visible_steps,
+)
 from control_plane.auth.principal import Principal, resolve_principal
 from control_plane.errors import APIError, api_error, not_found
 from control_plane.models_db import (
@@ -79,7 +86,8 @@ async def _load_owned_workflow(
     row = (
         await session.execute(
             select(*_WF_COLS).where(
-                workflows.c.id == wid, workflows.c.tenant_id == tenant_id
+                workflows.c.id == wid, workflows.c.tenant_id == tenant_id,
+                visible_steps(workflows.c.steps, session_principal(session))
             )
         )
     ).mappings().first()
@@ -114,7 +122,8 @@ async def _assert_steps_exist(
         for r in (
             await session.execute(
                 select(containers.c.id).where(
-                    containers.c.id.in_(cids), containers.c.tenant_id == tenant_id
+                    containers.c.id.in_(cids), containers.c.tenant_id == tenant_id,
+                    visible_containers(session_principal(session))
                 )
             )
         ).all()
@@ -132,7 +141,9 @@ async def _load_run(
     row = (
         await session.execute(
             select(workflow_runs).where(
-                workflow_runs.c.id == rid, workflow_runs.c.tenant_id == tenant_id
+                workflow_runs.c.id == rid, workflow_runs.c.tenant_id == tenant_id,
+                visible_steps(workflow_runs.c.steps, session_principal(session)),
+                visible_owner(workflow_runs.c.run_as_user_id, session_principal(session))
             )
         )
     ).mappings().first()
@@ -149,10 +160,12 @@ async def list_workflows(
     principal's tenant, ordered by name.
     """
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         rows = (
             await session.execute(
                 select(*_WF_COLS)
-                .where(workflows.c.tenant_id == principal.tenant_id)
+                .where(workflows.c.tenant_id == principal.tenant_id,
+                       visible_steps(workflows.c.steps, principal))
                 .order_by(workflows.c.name)
             )
         ).mappings().all()
@@ -180,6 +193,7 @@ async def create_workflow(
         steps=[s.model_dump() for s in payload.steps],
     )
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         await _assert_steps_exist(session, principal.tenant_id, steps)
         dupe = (
             await session.execute(
@@ -220,6 +234,7 @@ async def get_workflow(
     workflow with ``wid`` belongs to the tenant.
     """
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         return workflow_view(
             await _load_owned_workflow(session, principal.tenant_id, wid)
         )
@@ -241,6 +256,7 @@ async def patch_workflow(
     """
     patch = UpdateWorkflowRequest(**(await request.json()))
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         existing = await _load_owned_workflow(session, principal.tenant_id, wid)
         name = patch.name if patch.name is not None else existing["name"]
         description = (
@@ -301,6 +317,7 @@ async def delete_workflow(
     workflow does not exist for the tenant.
     """
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         await _load_owned_workflow(session, principal.tenant_id, wid)
         await session.execute(
             sa.delete(workflows).where(
@@ -330,6 +347,7 @@ async def run_workflow(
     payload = RunWorkflowRequest(**(await request.json() if body else {}))
     st = request.app.state
     async with st.session_factory() as session:
+        bind_principal(session, principal)
         workflow = await _load_owned_workflow(session, principal.tenant_id, wid)
         try:
             run_id = await start_run(
@@ -369,6 +387,7 @@ async def list_workflow_runs(
     workflow is not found for the tenant.
     """
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         await _load_owned_workflow(session, principal.tenant_id, wid)
         rows = (
             await session.execute(
@@ -376,6 +395,8 @@ async def list_workflow_runs(
                 .where(
                     workflow_runs.c.workflow_id == wid,
                     workflow_runs.c.tenant_id == principal.tenant_id,
+                    visible_steps(workflow_runs.c.steps, principal),
+                    visible_owner(workflow_runs.c.run_as_user_id, principal),
                 )
                 .order_by(workflow_runs.c.started_at.desc())
                 .limit(100)
@@ -397,6 +418,7 @@ async def get_workflow_run(
     workflow, or the run scoped to that workflow, is not found for the tenant.
     """
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         await _load_owned_workflow(session, principal.tenant_id, wid)
         run = await _load_run(session, principal.tenant_id, run_id)
         if run is None or run["workflow_id"] != wid:
@@ -483,6 +505,7 @@ async def stream_workflow_run_events(
     the tenant.
     """
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         await _load_owned_workflow(session, principal.tenant_id, wid)
         run = await _load_run(session, principal.tenant_id, run_id)
         if run is None or run["workflow_id"] != wid:

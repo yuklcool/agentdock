@@ -29,6 +29,9 @@ from agentcore.models import (
     TaskLimits,
 )
 from control_plane import lifecycle
+from control_plane.access import session_principal, visible_container_ids
+from control_plane.admission import admit_task
+from control_plane.audit import audit
 from control_plane.auth import Principal
 from control_plane.auth.crypto import decrypt_secret, load_key_from_env
 from control_plane.config import Settings
@@ -661,7 +664,20 @@ async def submit_task_core(
         task_id=task_id, tenant_id=tenant_id, container_id=cid, task=body,
         config=config, scheduled_task_id=scheduled_task_id, session_id=body.session_id,
     )
+    principal = session_principal(session)
+    actor = principal.user_id if principal else getattr(row, "owner_user_id", None)
+    task_row["submitted_by"] = actor
+    task_row["body"] = {**task_row["body"], "limits": resolved.model_dump()}
+    await admit_task(
+        session, tenant_id=tenant_id, user_id=actor, container_id=cid,
+        max_tokens=resolved.max_tokens,
+        worker_cap=worker_cap_for_driver(tenant_limits, config.driver), limits=tenant_limits,
+    )
     await session.execute(tasks.insert().values(**task_row))
+    await audit(session, actor_type="tenant" if principal else "system", actor_id=actor,
+                action="task.submitted", target_type="task", target_id=task_id,
+                details={"tenant_id": tenant_id, "container_id": cid,
+                         "reserved_tokens": resolved.max_tokens})
     await session.commit()
 
     # Linked (pull-mode) containers never snapshot/push: the workspace is a
@@ -923,7 +939,8 @@ async def recent_tenant_tasks(
         await session.execute(
             select(tasks, containers.c.name.label("container_name"))
             .join(containers, containers.c.id == tasks.c.container_id)
-            .where(tasks.c.tenant_id == tenant_id)
+            .where(tasks.c.tenant_id == tenant_id,
+                   tasks.c.container_id.in_(visible_container_ids(session)))
             .order_by(tasks.c.created_at.desc())
             .limit(limit)
         )

@@ -17,7 +17,10 @@ def test_principal_has_available_tenant_ids_default_empty():
 
 def test_principal_carries_available_tenant_ids():
     p = Principal(
-        tenant_id="ten_1", role="admin", is_staff=False, user_id="usr_1",
+        tenant_id="ten_1",
+        role="admin",
+        is_staff=False,
+        user_id="usr_1",
         available_tenant_ids=("ten_1", "ten_2"),
     )
     assert p.available_tenant_ids == ("ten_1", "ten_2")
@@ -68,7 +71,13 @@ def _session_row(active_tenant_id):
     }
 
 
-_ACTIVE_USER = {"id": "usr_1", "is_staff": False, "status": "active", "tenant_id": None, "role": "member"}
+_ACTIVE_USER = {
+    "id": "usr_1",
+    "is_staff": False,
+    "status": "active",
+    "tenant_id": None,
+    "role": "member",
+}
 
 
 @pytest.mark.asyncio
@@ -79,7 +88,8 @@ async def test_resolve_single_membership_uses_active_tenant():
         memberships=[{"tenant_id": "ten_a", "role": "owner"}],
     )
     p = await resolve_from_inputs(
-        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None)
+        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None
+    )
     assert p.tenant_id == "ten_a"
     assert p.role == "owner"
     assert p.is_staff is False
@@ -97,7 +107,8 @@ async def test_resolve_multi_membership_picks_selected_role():
         ],
     )
     p = await resolve_from_inputs(
-        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None)
+        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None
+    )
     assert p.tenant_id == "ten_b"
     assert p.role == "member"
     assert set(p.available_tenant_ids) == {"ten_a", "ten_b"}
@@ -114,7 +125,8 @@ async def test_resolve_no_active_tenant_is_limbo():
         ],
     )
     p = await resolve_from_inputs(
-        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None)
+        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None
+    )
     assert p.tenant_id is None
     assert p.role == "member"
     assert p.is_staff is False
@@ -129,7 +141,8 @@ async def test_resolve_stale_active_tenant_falls_back_to_limbo():
         memberships=[{"tenant_id": "ten_a", "role": "member"}],
     )
     p = await resolve_from_inputs(
-        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None)
+        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None
+    )
     assert p.tenant_id is None
     assert p.available_tenant_ids == ("ten_a",)
 
@@ -142,7 +155,8 @@ async def test_resolve_staff_unchanged():
         memberships=[],
     )
     p = await resolve_from_inputs(
-        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None)
+        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None
+    )
     assert p.is_staff is True
     assert p.tenant_id is None
     assert p.available_tenant_ids == ()
@@ -156,7 +170,8 @@ async def test_resolve_zero_memberships_is_limbo():
         memberships=[],
     )
     p = await resolve_from_inputs(
-        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None)
+        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None
+    )
     assert p.tenant_id is None
     assert p.role == "member"
     assert p.is_staff is False
@@ -172,7 +187,8 @@ async def test_resolve_staff_impersonates_existing_tenant():
         existing_tenants=["ten_x"],
     )
     p = await resolve_from_inputs(
-        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None)
+        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None
+    )
     assert p.is_staff is True
     assert p.tenant_id == "ten_x"
     assert p.role == "owner"
@@ -186,7 +202,8 @@ async def test_resolve_staff_with_no_active_tenant_is_cross_tenant():
         memberships=[],
     )
     p = await resolve_from_inputs(
-        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None)
+        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None
+    )
     assert p.is_staff is True
     assert p.tenant_id is None
 
@@ -200,6 +217,7 @@ async def test_resolve_staff_stale_tenant_falls_back_to_cross_tenant():
         existing_tenants=[],
     )
     p = await resolve_from_inputs(
-        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None)
+        repo, authorization=None, cookie_token="cookie-token", admin_api_key_env=None
+    )
     assert p.is_staff is True
     assert p.tenant_id is None

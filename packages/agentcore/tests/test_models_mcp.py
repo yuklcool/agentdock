@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentcore.models import AgentConfig, ShimMcpServer, ShimTaskRequest, TaskBody, ResolvedLimits
+from agentcore.models import AgentConfig, ResolvedLimits, ShimMcpServer, ShimTaskRequest, TaskBody
 
 pytestmark = pytest.mark.unit
 

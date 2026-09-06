@@ -2,13 +2,15 @@
 destroy (running -> archived, keeps volume) + rehydrate (run_from_volume ->
 new image). Uses the real lifecycle code so locks/transitions stay consistent
 with the background reconciler. Pass the container id as argv[1]."""
+
 import asyncio
 import sys
 
+import docker
+
+from control_plane import lifecycle
 from control_plane.config import Settings
 from control_plane.db import make_engine, make_session_factory
-from control_plane import lifecycle
-import docker
 
 
 async def main(cid: str) -> None:
@@ -27,8 +29,9 @@ async def main(cid: str) -> None:
     shim = _NoopShim()
 
     async with session_factory() as db:
-        ok = await lifecycle.destroy(db, docker_client, shim, cid,
-                                     actor_type="staff", actor_id="recycle-script")
+        ok = await lifecycle.destroy(
+            db, docker_client, shim, cid, actor_type="staff", actor_id="recycle-script"
+        )
         await db.commit()
         print(f"destroy -> archived: {ok}")
 

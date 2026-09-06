@@ -33,3 +33,12 @@ def test_explicit_agent_extra_env_wins_over_exa_var(monkeypatch):
     monkeypatch.setenv("AGENT_EXTRA_ENV", "EXA_API_KEY=operator-key")
     s = Settings.from_env()
     assert s.agent_extra_env["EXA_API_KEY"] == "operator-key"
+
+
+def test_native_network_policy_reaches_provisioned_shim(monkeypatch):
+    _base_env(monkeypatch)
+    monkeypatch.delenv("AGENT_EXTRA_ENV", raising=False)
+    monkeypatch.setenv("AGENTDOCK_NANOBOT_SSRF_WHITELIST", "10.0.0.7/32 ::1/128")
+    assert Settings.from_env().agent_extra_env["AGENTDOCK_NANOBOT_SSRF_WHITELIST"] == (
+        "10.0.0.7/32 ::1/128"
+    )

@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
-
 import pytest
 from fastapi.testclient import TestClient
 
-import control_plane.routers.containers as containers_mod
 from control_plane.app import create_app
 from control_plane.auth.principal import Principal, resolve_principal
 from control_plane.config import Settings

@@ -4,6 +4,7 @@ Reads the values back off the compiled statement, so no database is needed.
 The postgresql dialect is required: the default dialect cannot compile the
 JSONB payload column.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -58,7 +59,12 @@ async def test_insert_binds_the_shim_timestamp(factory, session, monkeypatch):
     await tasksmod._persist_event_best_effort(
         factory,
         "tk_1",
-        {"seq": 7, "type": "tool_call", "ts": "2026-09-02T10:00:00+00:00", "payload": {"name": "shell"}},
+        {
+            "seq": 7,
+            "type": "tool_call",
+            "ts": "2026-09-02T10:00:00+00:00",
+            "payload": {"name": "shell"},
+        },
     )
 
     params = session.params(0)
@@ -67,7 +73,9 @@ async def test_insert_binds_the_shim_timestamp(factory, session, monkeypatch):
     assert params["task_id"] == "tk_1"
 
 
-async def test_insert_still_persists_an_event_with_a_broken_timestamp(factory, session, monkeypatch):
+async def test_insert_still_persists_an_event_with_a_broken_timestamp(
+    factory, session, monkeypatch
+):
     async def _noop_apply(s, task_id, event):
         return None
 
@@ -90,7 +98,12 @@ async def test_ended_at_comes_from_the_terminal_event(session):
             "seq": 12,
             "type": "status_change",
             "ts": "2026-09-02T10:05:30+00:00",
-            "payload": {"from": "running", "to": "completed", "result": {"output": "hi"}, "error": None},
+            "payload": {
+                "from": "running",
+                "to": "completed",
+                "result": {"output": "hi"},
+                "error": None,
+            },
         },
     )
 

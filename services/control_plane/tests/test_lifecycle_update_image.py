@@ -27,7 +27,9 @@ def recorder(monkeypatch):
         calls.append(("pull", image_tag, force))
         return f"agent-runtime:{image_tag}"
 
-    async def fake_audit(db, *, actor_type, action, actor_id=None, target_type=None, target_id=None, details=None):
+    async def fake_audit(
+        db, *, actor_type, action, actor_id=None, target_type=None, target_id=None, details=None
+    ):
         calls.append(("audit", action, details))
 
     monkeypatch.setattr(lc, "_set", fake_set)
@@ -44,7 +46,9 @@ async def test_running_pulls_then_recreates(recorder, monkeypatch):
         return "running"
 
     monkeypatch.setattr(lc, "current_status", status)
-    await lc.update_image(None, object(), object(), "ctr_1", "ten_1", "v2", limit=5, settings=object())
+    await lc.update_image(
+        None, object(), object(), "ctr_1", "ten_1", "v2", limit=5, settings=object()
+    )
     assert [c[0] for c in recorder] == ["pull", "set", "audit", "destroy", "restore"]
     audit_call = next(c for c in recorder if c[0] == "audit")
     assert audit_call[1] == "container.update_image"
@@ -57,7 +61,9 @@ async def test_archived_only_sets_tag(recorder, monkeypatch):
         return "archived"
 
     monkeypatch.setattr(lc, "current_status", status)
-    await lc.update_image(None, object(), object(), "ctr_1", "ten_1", "v2", limit=5, settings=object())
+    await lc.update_image(
+        None, object(), object(), "ctr_1", "ten_1", "v2", limit=5, settings=object()
+    )
     assert [c[0] for c in recorder] == ["pull", "set", "audit"]  # no destroy/restore
     audit_call = next(c for c in recorder if c[0] == "audit")
     assert audit_call[1] == "container.update_image"
@@ -70,7 +76,9 @@ async def test_update_image_forces_pull(recorder, monkeypatch):
         return "running"
 
     monkeypatch.setattr(lc, "current_status", status)
-    await lc.update_image(None, object(), object(), "ctr_1", "ten_1", "v2", limit=5, settings=object())
+    await lc.update_image(
+        None, object(), object(), "ctr_1", "ten_1", "v2", limit=5, settings=object()
+    )
     pull_call = next(c for c in recorder if c[0] == "pull")
     assert pull_call == ("pull", "v2", True)
 
@@ -82,7 +90,9 @@ async def test_invalid_state_409(recorder, monkeypatch):
 
     monkeypatch.setattr(lc, "current_status", status)
     with pytest.raises(APIError) as ei:
-        await lc.update_image(None, object(), object(), "ctr_1", "ten_1", "v2", limit=5, settings=object())
+        await lc.update_image(
+            None, object(), object(), "ctr_1", "ten_1", "v2", limit=5, settings=object()
+        )
     assert ei.value.status_code == 409
     assert recorder == []  # nothing pulled or changed
 
@@ -104,6 +114,8 @@ async def test_pull_failure_no_teardown(monkeypatch):
     monkeypatch.setattr(lc, "destroy", fake_destroy)
     monkeypatch.setattr(provision, "pull_or_verify_image", fail_pull)
     with pytest.raises(APIError) as ei:
-        await lc.update_image(None, object(), object(), "ctr_1", "ten_1", "bad", limit=5, settings=object())
+        await lc.update_image(
+            None, object(), object(), "ctr_1", "ten_1", "bad", limit=5, settings=object()
+        )
     assert ei.value.status_code == 422
     assert calls == []  # never torn down

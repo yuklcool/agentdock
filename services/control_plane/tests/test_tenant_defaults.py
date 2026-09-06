@@ -22,9 +22,17 @@ def test_merge_limits_overrides_only_supplied_keys() -> None:
 
 def test_defaults_have_no_allowed_models() -> None:
     from control_plane.tenant_defaults import default_limits
+
     lim = default_limits()
     assert "allowed_models" not in lim
-    assert lim["allowed_drivers"] == ["vanilla", "opencode", "codex", "claude-code", "api", "nanobot"]
+    assert lim["allowed_drivers"] == [
+        "vanilla",
+        "opencode",
+        "codex",
+        "claude-code",
+        "api",
+        "nanobot",
+    ]
 
 
 def test_claude_code_in_default_allowed_drivers() -> None:
@@ -40,7 +48,12 @@ def test_persisted_limits_does_not_freeze_allowed_drivers() -> None:
     assert stored["max_containers"] == 2000  # numeric defaults still materialized
     # Resolving the stored row yields the current full driver set.
     assert merge_limits(stored)["allowed_drivers"] == [
-        "vanilla", "opencode", "codex", "claude-code", "api", "nanobot"
+        "vanilla",
+        "opencode",
+        "codex",
+        "claude-code",
+        "api",
+        "nanobot",
     ]
 
 

@@ -1,0 +1,24 @@
+groups:
+  - name: agentdock
+    rules:
+      - alert: AgentDockUnavailable
+        expr: up{job="agentdock"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: AgentDock API or database is unavailable
+      - alert: AgentDockRuntimeError
+        expr: agentdock_containers{status="error"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: AgentDock instances need recovery
+      - alert: AgentDockStaleTasks
+        expr: agentdock_stale_tasks > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: AgentDock tasks have been active for over one hour

@@ -1,7 +1,9 @@
 """scheduler unit tests: pure advance values + submit-and-record outcomes."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -27,7 +29,8 @@ class _DueRow:
 
 def test_advance_recurring_moves_to_next_slot():
     vals = _advance_values(
-        {"kind": "recurring", "unit": "day", "time": "09:00"}, "UTC",
+        {"kind": "recurring", "unit": "day", "time": "09:00"},
+        "UTC",
         datetime(2026, 6, 17, 10, 0, tzinfo=UTC),
     )
     assert vals["next_run_at"] == datetime(2026, 6, 18, 9, 0, tzinfo=UTC)
@@ -61,10 +64,13 @@ async def test_submit_due_schedule_records_submitted(monkeypatch):
     monkeypatch.setattr(scheduler_mod, "_apply_schedule_update", fake_apply)
 
     await scheduler_mod._submit_due_schedule(
-        session=object(), row=_DueRow({"kind": "recurring", "unit": "day", "time": "09:00"}),
+        session=SimpleNamespace(info={}),
+        row=_DueRow({"kind": "recurring", "unit": "day", "time": "09:00"}),
         now=datetime(2026, 6, 17, 10, 0, tzinfo=UTC),
-        settings=object(), session_factory=lambda: None,
-        docker_client=object(), shim_dispatcher=object(),
+        settings=object(),
+        session_factory=lambda: None,
+        docker_client=object(),
+        shim_dispatcher=object(),
     )
     assert recorded["last_status"] == "submitted"
     assert recorded["last_run_ref"] == "tsk_1"
@@ -89,10 +95,13 @@ async def test_submit_due_schedule_records_failed(monkeypatch):
     monkeypatch.setattr(scheduler_mod, "_apply_schedule_update", fake_apply)
 
     await scheduler_mod._submit_due_schedule(
-        session=object(), row=_DueRow({"kind": "once"}),
+        session=SimpleNamespace(info={}),
+        row=_DueRow({"kind": "once"}),
         now=datetime(2026, 6, 17, 10, 0, tzinfo=UTC),
-        settings=object(), session_factory=lambda: None,
-        docker_client=object(), shim_dispatcher=object(),
+        settings=object(),
+        session_factory=lambda: None,
+        docker_client=object(),
+        shim_dispatcher=object(),
     )
     assert recorded["last_status"] == "failed"
     assert recorded["last_run_ref"] is None

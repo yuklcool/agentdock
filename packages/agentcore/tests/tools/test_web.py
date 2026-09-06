@@ -74,9 +74,7 @@ async def test_web_search_format_json_param_sent(tmp_path, monkeypatch):
 async def test_web_fetch_text_mode_extracts_content(tmp_path):
     html = (FIXTURES / "article.html").read_text()
     respx.get("https://example.test/article").mock(
-        return_value=httpx.Response(
-            200, html=html, headers={"content-type": "text/html"}
-        )
+        return_value=httpx.Response(200, html=html, headers={"content-type": "text/html"})
     )
     res = await WebFetchTool().run(
         {"url": "https://example.test/article", "mode": "text"}, ctx(tmp_path)
@@ -163,6 +161,7 @@ async def test_web_fetch_rendered_truncates_with_marker(tmp_path, monkeypatch):
 def test_web_tools_self_register():
     import agentcore.tools.web  # noqa: F401
     from agentcore.tools.base import TOOLS
+
     assert "web_search" in TOOLS
     assert "web_fetch" in TOOLS
 
@@ -192,10 +191,13 @@ WIKIPEDIA_JSON = {
 async def test_web_search_empty_with_unresponsive_engines_is_error(tmp_path, monkeypatch):
     monkeypatch.setenv("SEARCH_PROVIDER_URL", "http://searxng.test:8080")
     respx.get("http://searxng.test:8080/search").mock(
-        return_value=httpx.Response(200, json={
-            "results": [],
-            "unresponsive_engines": [["duckduckgo", "CAPTCHA"], ["brave", "too many requests"]],
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "results": [],
+                "unresponsive_engines": [["duckduckgo", "CAPTCHA"], ["brave", "too many requests"]],
+            },
+        )
     )
     # Wikipedia floor is also down → the original degraded error must surface.
     respx.get("https://en.wikipedia.org/w/rest.php/v1/search/page").mock(
@@ -214,10 +216,13 @@ async def test_web_search_empty_with_unresponsive_engines_is_error(tmp_path, mon
 async def test_web_search_degraded_falls_back_to_wikipedia(tmp_path, monkeypatch):
     monkeypatch.setenv("SEARCH_PROVIDER_URL", "http://searxng.test:8080")
     respx.get("http://searxng.test:8080/search").mock(
-        return_value=httpx.Response(200, json={
-            "results": [],
-            "unresponsive_engines": [["brave", "too many requests"]],
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "results": [],
+                "unresponsive_engines": [["brave", "too many requests"]],
+            },
+        )
     )
     wiki = respx.get("https://en.wikipedia.org/w/rest.php/v1/search/page").mock(
         return_value=httpx.Response(200, json=WIKIPEDIA_JSON)
@@ -417,10 +422,13 @@ async def test_web_search_exa_fails_searxng_degraded_reaches_wikipedia(tmp_path,
     monkeypatch.setenv("SEARCH_PROVIDER_URL", "http://searxng.test:8080")
     respx.post("https://api.exa.ai/search").mock(return_value=httpx.Response(500))
     respx.get("http://searxng.test:8080/search").mock(
-        return_value=httpx.Response(200, json={
-            "results": [],
-            "unresponsive_engines": [["brave", "too many requests"]],
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "results": [],
+                "unresponsive_engines": [["brave", "too many requests"]],
+            },
+        )
     )
     respx.get("https://en.wikipedia.org/w/rest.php/v1/search/page").mock(
         return_value=httpx.Response(200, json=WIKIPEDIA_JSON)
@@ -448,7 +456,9 @@ async def test_web_search_ctx_env_key_wins(tmp_path, monkeypatch):
 
 
 EXA_CONTENTS_JSON = {
-    "results": [{"url": "https://a.example/p", "title": "P", "text": "# Title\n\nClean article body."}]
+    "results": [
+        {"url": "https://a.example/p", "title": "P", "text": "# Title\n\nClean article body."}
+    ]
 }
 
 
@@ -506,10 +516,12 @@ async def test_web_read_missing_url_is_error_result(tmp_path):
 
 def test_web_read_spec_slim_safe_and_registered():
     from agentcore.tools.base import TOOLS
+
     assert WebReadTool().spec.requires_image_feature is None
     assert "web_read" in TOOLS
 
 
 def test_web_read_in_vanilla_template():
     from agentcore.drivers.vanilla import VanillaDriver
+
     assert "web_read" in VanillaDriver.default_template.available_tools

@@ -1,6 +1,5 @@
 # packages/agentcore/tests/drivers/test_api_loop.py
 import asyncio
-import json
 
 import pytest
 

@@ -16,7 +16,8 @@ from control_plane.shim_client import ShimClient
 
 log = logging.getLogger("provision")
 
-_CPU_PERIOD_US = 100_000  # matches docker_ctl/__init__.py's _CPU_PERIOD_US — must stay in sync (Docker's --cpus/nano_cpus conversion)
+# Keep in sync with docker_ctl/__init__.py (Docker CPU conversion).
+_CPU_PERIOD_US = 100_000
 
 
 @dataclass
@@ -182,6 +183,7 @@ async def provision_container(
     cpus: float,
     reuse_volume_name: str | None = None,
     extra_env: dict[str, str] | None = None,
+    shim_token: str | None = None,
 ) -> ProvisionResult:
     """Create the volume + container, start it, poll /readyz. On failure remove
     the partial container and the volume we created (a reused volume is left intact),
@@ -194,7 +196,7 @@ async def provision_container(
     """
     client = _docker_client()
     docker_name = docker_name_for(container_id)
-    shim_token = secrets.token_urlsafe(32)
+    shim_token = shim_token or secrets.token_urlsafe(32)
 
     created_volume = False
     if reuse_volume_name is not None:
@@ -215,7 +217,7 @@ async def provision_container(
             tenant_id=tenant_id,
             shim_token=shim_token,
             max_concurrent_tasks=max_workers,
-            image_tag=image_tag,   # the resolved per-container tag passed into provision_container
+            image_tag=image_tag,  # the resolved per-container tag passed into provision_container
             mem_limit=mem_limit,
             cpus=cpus,
         )
@@ -242,14 +244,10 @@ async def provision_container(
         # the background pre-pull sweep keeps the default tag warm so this is a
         # local no-op in the common case.
         await asyncio.to_thread(pull_or_verify_image, client, settings, image_tag)
-        log.info(
-            "provision %s: image ready in %.2fs", container_id, time.monotonic() - t_start
-        )
+        log.info("provision %s: image ready in %.2fs", container_id, time.monotonic() - t_start)
         t_run = time.monotonic()
         cont: docker.models.containers.Container = await asyncio.to_thread(_run)
-        log.info(
-            "provision %s: container started in %.2fs", container_id, time.monotonic() - t_run
-        )
+        log.info("provision %s: container started in %.2fs", container_id, time.monotonic() - t_run)
     except Exception:
         if created_volume:
             await _safe_remove_volume(client, volume_name)
@@ -276,9 +274,7 @@ async def provision_container(
     )
     if not ready:
         await _teardown(client, docker_name, volume_name if created_volume else None)
-        raise ReadinessFailed(
-            f"{docker_name} not ready within {settings.readyz_timeout_seconds}s"
-        )
+        raise ReadinessFailed(f"{docker_name} not ready within {settings.readyz_timeout_seconds}s")
 
     return ProvisionResult(
         docker_name=docker_name,
@@ -306,9 +302,7 @@ async def _safe_remove_volume(client: docker.DockerClient, volume_name: str) -> 
         pass
 
 
-async def _teardown(
-    client: docker.DockerClient, docker_name: str, volume_name: str | None
-) -> None:
+async def _teardown(client: docker.DockerClient, docker_name: str, volume_name: str | None) -> None:
     try:
         cont = await asyncio.to_thread(client.containers.get, docker_name)
         await asyncio.to_thread(cont.remove, force=True)
@@ -318,9 +312,7 @@ async def _teardown(
         await _safe_remove_volume(client, volume_name)
 
 
-async def destroy_container(
-    *, docker_name: str, volume_name: str, delete_volume: bool
-) -> None:
+async def destroy_container(*, docker_name: str, volume_name: str, delete_volume: bool) -> None:
     """Stop+remove the container; remove the volume only if delete_volume."""
     client = _docker_client()
     await _teardown(client, docker_name, volume_name if delete_volume else None)

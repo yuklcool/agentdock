@@ -43,7 +43,10 @@ def test_mark_running_sets_status_started_and_optional_container():
 
 def test_mark_task_completed_failed():
     from control_plane.workflow_timeline import (
-        init_timeline, mark_task, mark_completed, mark_failed,
+        init_timeline,
+        mark_completed,
+        mark_failed,
+        mark_task,
     )
 
     now = datetime(2026, 6, 29, 9, 5, 0, tzinfo=UTC)

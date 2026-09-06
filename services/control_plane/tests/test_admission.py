@@ -58,7 +58,7 @@ class FakeDB:
         s = str(stmt).lower()
         p: dict[str, object] = params if isinstance(params, dict) else {}
         if "count(" in s and "containers" in s and "any(:live" in s.replace(" ", ""):
-            live = {"running", "provisioning", "resuming"}
+            live = {"running", "provisioning", "resuming", "recovering"}
             exclude = p.get("exclude")
             n = sum(
                 1
@@ -67,7 +67,7 @@ class FakeDB:
             )
             return _Res(n)
         if "count(" in s and "containers" in s and "in (" in s:  # fallback live count form
-            live = {"running", "provisioning", "resuming"}
+            live = {"running", "provisioning", "resuming", "recovering"}
             n = sum(1 for c in self.rows if c["status"] in live)
             return _Res(n)
         if "order by" in s and "last_task_at" in s:  # LRU candidate

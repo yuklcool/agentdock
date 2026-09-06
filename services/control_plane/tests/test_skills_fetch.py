@@ -6,7 +6,9 @@ import tarfile
 import pytest
 
 from control_plane.skills_fetch import (
+    DiscoveredRepo,
     FetchedSkill,
+    discover_git_skills,
     fetch_git_skill,
     list_branches,
     pack_dir,
@@ -128,9 +130,7 @@ def _make_repo(tmp_path):
     _git(["init", "-q", "-b", "main"], repo)
     skill_dir = repo / "skills" / "pdf"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        '---\nname: pdf\ndescription: "Edit PDFs"\n---\n# Use it\n'
-    )
+    (skill_dir / "SKILL.md").write_text('---\nname: pdf\ndescription: "Edit PDFs"\n---\n# Use it\n')
     (skill_dir / "scripts").mkdir()
     (skill_dir / "scripts" / "run.sh").write_text("echo hi\n")
     _git(["add", "-A"], repo)
@@ -319,7 +319,6 @@ def test_fetch_git_skill_rejects_file_url_without_flag(monkeypatch) -> None:
 # discover_git_skills: multi-skill repo discovery
 # ---------------------------------------------------------------------------
 
-from control_plane.skills_fetch import DiscoveredRepo, discover_git_skills
 
 
 def _make_multi_skill_repo(tmp_path, specs):
@@ -336,8 +335,11 @@ def _make_multi_skill_repo(tmp_path, specs):
     _git(["add", "-A"], repo)
     _git(["commit", "-q", "-m", "init"], repo)
     sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo,
-        capture_output=True, text=True, check=True,
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     return f"file://{repo}", sha
 
@@ -348,20 +350,27 @@ def _md(name, description="d"):
 
 @pytest.mark.unit
 def test_discover_lists_every_skill_sorted_by_subpath(tmp_path) -> None:
-    url, sha = _make_multi_skill_repo(tmp_path, [
-        ("plugins/suite/skills/writer", _md("writer", "writes")),
-        ("plugins/suite/skills/research", _md("research", "researches")),
-    ])
+    url, sha = _make_multi_skill_repo(
+        tmp_path,
+        [
+            ("plugins/suite/skills/writer", _md("writer", "writes")),
+            ("plugins/suite/skills/research", _md("research", "researches")),
+        ],
+    )
     out = discover_git_skills(url=url, ref="main")
     assert isinstance(out, DiscoveredRepo)
     assert out.pinned_sha == sha
     assert out.truncated is False
     assert [s.subpath for s in out.skills] == [
-        "plugins/suite/skills/research", "plugins/suite/skills/writer",
+        "plugins/suite/skills/research",
+        "plugins/suite/skills/writer",
     ]
     research = out.skills[0]
     assert (research.name, research.description, research.valid, research.error) == (
-        "research", "researches", True, None,
+        "research",
+        "researches",
+        True,
+        None,
     )
 
 
@@ -389,10 +398,13 @@ def test_discover_empty_repo_returns_no_skills(tmp_path) -> None:
 
 @pytest.mark.unit
 def test_discover_broken_frontmatter_is_invalid_but_scan_continues(tmp_path) -> None:
-    url, _ = _make_multi_skill_repo(tmp_path, [
-        ("bad", "no frontmatter at all\n"),
-        ("good", _md("good")),
-    ])
+    url, _ = _make_multi_skill_repo(
+        tmp_path,
+        [
+            ("bad", "no frontmatter at all\n"),
+            ("good", _md("good")),
+        ],
+    )
     out = discover_git_skills(url=url, ref="main")
     bad = next(s for s in out.skills if s.subpath == "bad")
     good = next(s for s in out.skills if s.subpath == "good")
@@ -402,9 +414,12 @@ def test_discover_broken_frontmatter_is_invalid_but_scan_continues(tmp_path) -> 
 
 @pytest.mark.unit
 def test_discover_invalid_name_is_flagged(tmp_path) -> None:
-    url, _ = _make_multi_skill_repo(tmp_path, [
-        ("bad", '---\nname: "Bad Name"\ndescription: "d"\n---\nb\n'),
-    ])
+    url, _ = _make_multi_skill_repo(
+        tmp_path,
+        [
+            ("bad", '---\nname: "Bad Name"\ndescription: "d"\n---\nb\n'),
+        ],
+    )
     out = discover_git_skills(url=url, ref="main")
     assert out.skills[0].valid is False
     assert "must match" in (out.skills[0].error or "")
@@ -412,10 +427,13 @@ def test_discover_invalid_name_is_flagged(tmp_path) -> None:
 
 @pytest.mark.unit
 def test_discover_duplicate_names_keep_first_flag_rest(tmp_path) -> None:
-    url, _ = _make_multi_skill_repo(tmp_path, [
-        ("a-dir", _md("same-name")),
-        ("b-dir", _md("same-name")),
-    ])
+    url, _ = _make_multi_skill_repo(
+        tmp_path,
+        [
+            ("a-dir", _md("same-name")),
+            ("b-dir", _md("same-name")),
+        ],
+    )
     out = discover_git_skills(url=url, ref="main")
     first = next(s for s in out.skills if s.subpath == "a-dir")
     second = next(s for s in out.skills if s.subpath == "b-dir")

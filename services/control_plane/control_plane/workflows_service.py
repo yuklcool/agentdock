@@ -3,6 +3,7 @@
 Shape-only validation here; existence of referenced prompts/containers is
 checked in the router against the DB.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -26,37 +27,49 @@ def _normalize_exports(idx: int, raw: Any) -> list[str]:
         raise api_error(400, "validation_error", f"step {idx} exports must be a list", "steps")
     if len(raw) > MAX_STEP_EXPORTS:
         raise api_error(
-            400, "validation_error",
-            f"step {idx} has too many exports (max {MAX_STEP_EXPORTS})", "steps",
+            400,
+            "validation_error",
+            f"step {idx} has too many exports (max {MAX_STEP_EXPORTS})",
+            "steps",
         )
     out: list[str] = []
     for e in raw:
         if not isinstance(e, str) or not e.strip():
             raise api_error(
-                400, "validation_error",
-                f"step {idx} exports must be non-empty strings", "steps",
+                400,
+                "validation_error",
+                f"step {idx} exports must be non-empty strings",
+                "steps",
             )
         e = e.strip()
         if len(e) > MAX_EXPORT_LEN:
             raise api_error(
-                400, "validation_error",
-                f"step {idx} export exceeds {MAX_EXPORT_LEN} chars", "steps",
+                400,
+                "validation_error",
+                f"step {idx} export exceeds {MAX_EXPORT_LEN} chars",
+                "steps",
             )
         if e.startswith("/"):
             raise api_error(
-                400, "validation_error",
-                f"step {idx} export must be workspace-relative: {e}", "steps",
+                400,
+                "validation_error",
+                f"step {idx} export must be workspace-relative: {e}",
+                "steps",
             )
         parts = e.split("/")
         if ".." in parts:
             raise api_error(
-                400, "validation_error",
-                f"step {idx} export must not contain '..': {e}", "steps",
+                400,
+                "validation_error",
+                f"step {idx} export must not contain '..': {e}",
+                "steps",
             )
         if parts[0] in _EXPORT_RESERVED:
             raise api_error(
-                400, "validation_error",
-                f"step {idx} export targets a reserved path: {e}", "steps",
+                400,
+                "validation_error",
+                f"step {idx} export targets a reserved path: {e}",
+                "steps",
             )
         out.append(e)
     return out
@@ -83,7 +96,9 @@ def _normalize_step(idx: int, step: Any) -> dict[str, Any]:
     }
 
 
-def validate_workflow_fields(*, name: str, description: str | None, steps: Any) -> list[dict[str, Any]]:
+def validate_workflow_fields(
+    *, name: str, description: str | None, steps: Any
+) -> list[dict[str, Any]]:
     n = (name or "").strip()
     if not (1 <= len(n) <= MAX_WF_NAME):
         raise api_error(400, "validation_error", f"name must be 1-{MAX_WF_NAME} chars", "name")
@@ -97,8 +112,12 @@ def validate_workflow_fields(*, name: str, description: str | None, steps: Any) 
 
 
 def build_workflow_row(
-    *, tenant_id: str, created_by: str | None, name: str,
-    description: str | None, steps: list[dict[str, Any]],
+    *,
+    tenant_id: str,
+    created_by: str | None,
+    name: str,
+    description: str | None,
+    steps: list[dict[str, Any]],
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
     return {
@@ -128,6 +147,7 @@ def workflow_view(row: dict[str, Any]) -> dict[str, Any]:
 def run_view(row: dict[str, Any]) -> dict[str, Any]:
     def _s(v: Any) -> Any:
         return str(v) if v is not None else None
+
     return {
         "id": row["id"],
         "workflow_id": row["workflow_id"],
@@ -147,6 +167,7 @@ def run_view(row: dict[str, Any]) -> dict[str, Any]:
 def step_view(s: dict[str, Any]) -> dict[str, Any]:
     def _s(v: Any) -> Any:
         return str(v) if v is not None else None
+
     return {
         "step_index": s.get("step_index"),
         "task_id": s.get("task_id"),

@@ -12,9 +12,7 @@ pytestmark = pytest.mark.unit
 
 
 def _git(ws, *args: str) -> str:
-    out = subprocess.run(
-        ["git", "-C", str(ws), *args], capture_output=True, text=True, check=True
-    )
+    out = subprocess.run(["git", "-C", str(ws), *args], capture_output=True, text=True, check=True)
     return out.stdout.strip()
 
 
@@ -43,7 +41,7 @@ async def test_ensure_repo_is_idempotent(tmp_path):
 async def test_agent_runtime_dir_is_excluded(tmp_path):
     runtime = tmp_path / ".agent-runtime"
     runtime.mkdir()
-    (runtime / "auth.json").write_text("{\"secret\": true}")
+    (runtime / "auth.json").write_text('{"secret": true}')
     ops = GitOps(str(tmp_path))
     await ops.ensure_repo()
     tracked = _git(tmp_path, "ls-files")
@@ -125,7 +123,7 @@ async def test_rollback_untracks_runtime_secrets_and_keeps_them_on_disk(tmp_path
     runtime = tmp_path / ".agent-runtime" / "codex"
     runtime.mkdir(parents=True)
     (runtime / "auth.json").write_text('{"access_token": "oauth-secret"}')
-    _git(tmp_path, "add", "-f", ".agent-runtime")      # agent bypasses exclude
+    _git(tmp_path, "add", "-f", ".agent-runtime")  # agent bypasses exclude
     _git(tmp_path, "commit", "-m", "agent tracked secrets")
     (tmp_path / "f.txt").write_text("v2")
 
@@ -133,8 +131,7 @@ async def test_rollback_untracks_runtime_secrets_and_keeps_them_on_disk(tmp_path
 
     assert (tmp_path / "f.txt").read_text() == "v1"
     assert (runtime / "auth.json").read_text() == '{"access_token": "oauth-secret"}'
-    assert ".agent-runtime" not in _git(
-        tmp_path, "ls-tree", "-r", "--name-only", new_sha)
+    assert ".agent-runtime" not in _git(tmp_path, "ls-tree", "-r", "--name-only", new_sha)
 
 
 @pytest.mark.asyncio
@@ -142,7 +139,7 @@ async def test_corrupt_repo_is_reinitialized(tmp_path):
     ops = GitOps(str(tmp_path))
     await ops.ensure_repo()
     shutil.rmtree(tmp_path / ".git")
-    (tmp_path / ".git").write_text("not a repo")   # agent damage
+    (tmp_path / ".git").write_text("not a repo")  # agent damage
     info = await ops.ensure_repo()
     assert info == {"created": False, "reinitialized": True}
     assert _git(tmp_path, "log", "--oneline").endswith("repository reinitialized")
@@ -151,7 +148,7 @@ async def test_corrupt_repo_is_reinitialized(tmp_path):
 @pytest.mark.asyncio
 async def test_repo_status(tmp_path):
     ops = GitOps(str(tmp_path))
-    status = await ops.repo_status()       # lazily initializes
+    status = await ops.repo_status()  # lazily initializes
     assert status["initialized"] is True
     assert status["dirty"] is False
     (tmp_path / "new.txt").write_text("x")
@@ -182,13 +179,13 @@ async def test_log_entries_parses_task_ids_and_file_counts(tmp_path):
     (tmp_path / "b.txt").write_text("v1")
     await ops.commit_all("task tsk_1: completed")
     entries = await ops.log_entries()
-    assert len(entries) == 2                       # task commit + initial
+    assert len(entries) == 2  # task commit + initial
     top = entries[0]
     assert top["task_id"] == "tsk_1"
     assert top["files_changed"] == 2
     assert top["message"] == "task tsk_1: completed"
     assert isinstance(top["ts"], int)
-    assert entries[1]["task_id"] is None           # "initial snapshot"
+    assert entries[1]["task_id"] is None  # "initial snapshot"
 
 
 @pytest.mark.asyncio
@@ -208,7 +205,7 @@ async def test_rollback_restores_content_with_linear_history(tmp_path):
     entries = await ops.log_entries()
     assert entries[0]["sha"] == new_sha
     assert entries[0]["message"].startswith("rollback to ")
-    assert len(entries) == 4                      # nothing destroyed: initial, v1, v2, rollback
+    assert len(entries) == 4  # nothing destroyed: initial, v1, v2, rollback
 
 
 @pytest.mark.asyncio
@@ -230,7 +227,7 @@ async def test_rollback_snapshots_dirty_worktree_first(tmp_path):
     await ops.ensure_repo()
     (tmp_path / "f.txt").write_text("v1")
     sha_v1 = await ops.commit_all("task tsk_1: completed")
-    (tmp_path / "uploaded.txt").write_text("manual upload")   # uncommitted
+    (tmp_path / "uploaded.txt").write_text("manual upload")  # uncommitted
     await ops.rollback(sha_v1)
     entries = await ops.log_entries()
     # the dirty state was preserved as its own snapshot before rolling back
@@ -249,8 +246,7 @@ async def test_rollback_unknown_sha_raises(tmp_path):
 
 def _make_bare(tmp_path) -> str:
     bare = tmp_path / "remote.git"
-    subprocess.run(["git", "init", "--bare", str(bare)], check=True,
-                   capture_output=True)
+    subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
     return str(bare)
 
 
@@ -286,12 +282,12 @@ async def test_push_never_writes_remote_or_key_into_config(tmp_path):
     await ops.push(url=bare, ssh_private_key="FAKE-KEY", branch="main")
     config = (ws / ".git" / "config").read_text()
     assert "FAKE-KEY" not in config
-    assert bare not in config                      # remote URL not persisted
+    assert bare not in config  # remote URL not persisted
     # key is written transiently to .agent-runtime (not .agent-state) and
     # removed after the push — no persistent key file in the workspace
     key_dir = ws / ".agent-runtime" / "ssh"
     leftover_keys = [p for p in key_dir.iterdir() if p.name.startswith("id_")]
-    assert leftover_keys == []                     # key cleaned up post-push
+    assert leftover_keys == []  # key cleaned up post-push
 
 
 @pytest.mark.asyncio
@@ -317,6 +313,7 @@ async def test_verify_remote_ok_and_failure(tmp_path):
 
 def test_parse_ls_remote_heads():
     from shim.git_ops import parse_ls_remote_branches
+
     out = (
         "ref: refs/heads/main\tHEAD\n"
         "abc123\trefs/heads/main\n"
@@ -330,6 +327,7 @@ def test_parse_ls_remote_heads():
 
 def test_remote_host_extracts_host():
     from shim.git_ops import _remote_host
+
     assert _remote_host("git@github.com:a/b.git") == "github.com"
     assert _remote_host("ssh://git@gitlab.com:2222/g/r.git") == "gitlab.com"
 
@@ -338,9 +336,10 @@ def test_write_key_material_is_root_only_0600(tmp_path):
     import os
 
     from shim.git_ops import GitOps
+
     ops = GitOps(str(tmp_path))
     key_path, kh = ops._write_key_material("PRIVATE-KEY-DATA")
-    assert "/.agent-runtime/" in key_path        # root-only tree, NOT .agent-state
+    assert "/.agent-runtime/" in key_path  # root-only tree, NOT .agent-state
     assert "/.agent-state/" not in key_path
     assert oct(os.stat(key_path).st_mode)[-3:] == "600"
     assert os.path.exists(kh)
@@ -354,6 +353,7 @@ def test_write_key_material_is_root_only_0600(tmp_path):
 
 def test_classify_remote_error_codes():
     from shim.git_ops import classify_remote_error
+
     assert classify_remote_error("Permission denied (publickey).") == "auth_failed"
     assert classify_remote_error("Host key verification failed.") == "host_key_changed"
     assert classify_remote_error("Could not resolve host: x") == "host_unreachable"
@@ -390,13 +390,16 @@ def test_exclude_lists_both_runtime_dirs(tmp_path):
 
 def test_build_ssh_command_includes_proxy_and_key():
     from shim.git_ops import build_ssh_command
+
     cmd = build_ssh_command(
-        key_path="/run/k", known_hosts="/run/kh",
-        host="github.com", proxy="egress-proxy:8888",
+        key_path="/run/k",
+        known_hosts="/run/kh",
+        host="github.com",
+        proxy="egress-proxy:8888",
     )
     assert "/run/k" in cmd
     assert "ProxyCommand=" in cmd
-    assert "github.com" in cmd            # CONNECT target host
+    assert "github.com" in cmd  # CONNECT target host
     assert "egress-proxy:8888" in cmd
     assert "UserKnownHostsFile=/run/kh" in cmd
     assert "StrictHostKeyChecking=accept-new" in cmd
@@ -405,6 +408,7 @@ def test_build_ssh_command_includes_proxy_and_key():
 
 def test_build_ssh_command_without_proxy_omits_proxycommand():
     from shim.git_ops import build_ssh_command
+
     cmd = build_ssh_command(key_path="/k", known_hosts="/kh", host="h", proxy=None)
     assert "ProxyCommand" not in cmd
     assert "/k" in cmd
@@ -419,8 +423,10 @@ def test_build_ssh_command_proxycommand_is_single_shell_token():
     from shim.git_ops import build_ssh_command
 
     cmd = build_ssh_command(
-        key_path="/k", known_hosts="/kh",
-        host="github.com", proxy="egress-proxy:8888",
+        key_path="/k",
+        known_hosts="/kh",
+        host="github.com",
+        proxy="egress-proxy:8888",
     )
     toks = shlex.split(cmd)
     # find the -o ProxyCommand=... token (the value after the -o flag)
@@ -442,28 +448,44 @@ def test_ls_remote_lists_branches_from_local_bare_repo(tmp_path):
     # A bare remote with two branches, default = main.
     bare = tmp_path / "remote.git"
     subprocess.run(
-        ["git", "init", "--bare", "-b", "main", str(bare)], check=True, capture_output=True,
+        ["git", "init", "--bare", "-b", "main", str(bare)],
+        check=True,
+        capture_output=True,
     )
     work = tmp_path / "work"
     subprocess.run(["git", "init", "-b", "main", str(work)], check=True, capture_output=True)
-    env = {**os.environ,
-           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
     (work / "f.txt").write_text("hi")
     subprocess.run(["git", "-C", str(work), "add", "-A"], check=True, capture_output=True, env=env)
     subprocess.run(
-        ["git", "-C", str(work), "commit", "-m", "init"], check=True, capture_output=True, env=env,
+        ["git", "-C", str(work), "commit", "-m", "init"],
+        check=True,
+        capture_output=True,
+        env=env,
     )
     subprocess.run(
-        ["git", "-C", str(work), "branch", "dev"], check=True, capture_output=True, env=env,
+        ["git", "-C", str(work), "branch", "dev"],
+        check=True,
+        capture_output=True,
+        env=env,
     )
     subprocess.run(
         ["git", "-C", str(work), "remote", "add", "origin", str(bare)],
-        check=True, capture_output=True, env=env,
+        check=True,
+        capture_output=True,
+        env=env,
     )
     subprocess.run(
         ["git", "-C", str(work), "push", "origin", "main", "dev"],
-        check=True, capture_output=True, env=env,
+        check=True,
+        capture_output=True,
+        env=env,
     )
 
     ws = tmp_path / "ws"
@@ -502,13 +524,21 @@ def _make_bare_remote(tmp_path, branch="main"):
     work = tmp_path / "remote-work"
     work.mkdir()
     subprocess.run(["git", "-C", str(work), "init", "-b", branch], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(work), "config", "user.email", "t@t"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(work), "config", "user.name", "t"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(work), "config", "user.email", "t@t"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(work), "config", "user.name", "t"], check=True, capture_output=True
+    )
     (work / "README.md").write_text("from remote\n")
     subprocess.run(["git", "-C", str(work), "add", "-A"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(work), "commit", "-m", "remote init"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(work), "commit", "-m", "remote init"], check=True, capture_output=True
+    )
     bare = tmp_path / "remote.git"
-    subprocess.run(["git", "clone", "--bare", str(work), str(bare)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "clone", "--bare", str(work), str(bare)], check=True, capture_output=True
+    )
     return bare
 
 
@@ -547,7 +577,9 @@ async def test_clone_does_not_destroy_workspace_on_failure(tmp_path):
     ops = GitOps(str(ws))
     with pytest.raises(GitError):
         await ops.clone(
-            url=str(tmp_path / "does-not-exist.git"), ssh_private_key="", branch="main",
+            url=str(tmp_path / "does-not-exist.git"),
+            ssh_private_key="",
+            branch="main",
         )
     # the failed clone never touched the existing workspace
     assert (ws / "keep.txt").read_text() == "still here"

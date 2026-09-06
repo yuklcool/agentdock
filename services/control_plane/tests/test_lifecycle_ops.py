@@ -86,6 +86,9 @@ class StatusDB:
         s = str(stmt).lower()
         p: dict[str, object] = params if isinstance(params, dict) else {}
 
+        if "pg_advisory_xact_lock" in s:
+            return _R()
+
         # CAS from-any (must be checked BEFORE plain CAS — more specific):
         # UPDATE containers SET status = :new WHERE id = :cid AND status = ANY(:expected)
         if (

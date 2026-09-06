@@ -17,9 +17,13 @@ def test_config_path_under_codex_home(tmp_path):
 
 
 def test_write_creates_config_toml(tmp_path):
-    path = write_codex_config(str(tmp_path), [
-        ShimMcpServer(name="lin", url="https://m", auth_type="bearer", secret="t"),
-    ], "")
+    path = write_codex_config(
+        str(tmp_path),
+        [
+            ShimMcpServer(name="lin", url="https://m", auth_type="bearer", secret="t"),
+        ],
+        "",
+    )
     assert path == codex_config_path(str(tmp_path))
     toml = Path(path).read_text()
     assert "developer_instructions" not in toml
@@ -33,5 +37,7 @@ def test_write_empty_is_noop(tmp_path):
 
 
 def test_env_for_secret_server():
-    env = codex_mcp_env([ShimMcpServer(name="lin", url="https://m", auth_type="bearer", secret="t")])
+    env = codex_mcp_env(
+        [ShimMcpServer(name="lin", url="https://m", auth_type="bearer", secret="t")]
+    )
     assert env["MCP_LIN_TOKEN"] == "t"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from collections.abc import AsyncIterator
 from typing import Annotated, Any, NamedTuple
 
@@ -7,7 +8,6 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Trigger driver + tool registration so DRIVERS/TOOLS are populated.
@@ -19,6 +19,13 @@ from agentcore.models import AgentConfig, ResolvedLimits, TaskBody
 from agentcore.prompt import assemble_system_prompt
 from agentcore.tools.base import TOOLS
 from control_plane import lifecycle
+from control_plane.access import (
+    assert_container_access,
+    bind_principal,
+    is_manager,
+    session_principal,
+    visible_containers,
+)
 from control_plane.audit import audit
 from control_plane.auth import Principal
 from control_plane.auth.crypto import load_key_from_env
@@ -31,12 +38,11 @@ from control_plane.config_validation import (
 )
 from control_plane.docker_ctl.provision import (
     ReadinessFailed,
-    destroy_container,
     provision_container,
 )
 from control_plane.env_vars import public_env_vars, store_env_vars
 from control_plane.errors import APIError, api_error, not_found, validation_error
-from control_plane.ids import new_container_id
+from control_plane.ids import docker_name_for, new_container_id, volume_name_for
 from control_plane.mcp_service import filter_known_mcp_server_ids
 from control_plane.models_db import containers, templates, tenants
 from control_plane.models_db import mcp_servers as mcp_servers_table
@@ -151,21 +157,13 @@ class MaxContainersReached(Exception):
 def assert_under_container_cap(*, current_count: int, max_containers: int) -> None:
     """Raise MaxContainersReached if current_count >= max_containers."""
     if current_count >= max_containers:
-        raise MaxContainersReached(
-            f"tenant at max_containers ({max_containers})"
-        )
+        raise MaxContainersReached(f"tenant at max_containers ({max_containers})")
 
 
 # ---- dependencies ----------------------------------------------------------
 def _settings(request: Request) -> Settings:
     settings: Settings = request.app.state.settings
     return settings
-
-
-async def _session(request: Request) -> AsyncIterator[AsyncSession]:
-    factory = request.app.state.session_factory
-    async with factory() as session:
-        yield session
 
 
 async def _principal(principal: Principal = Depends(resolve_principal)) -> Principal:
@@ -179,6 +177,16 @@ async def _principal(principal: Principal = Depends(resolve_principal)) -> Princ
     return principal
 
 
+async def _session(
+    request: Request,
+    principal: Principal = Depends(_principal),
+) -> AsyncIterator[AsyncSession]:
+    factory = request.app.state.session_factory
+    async with factory() as session:
+        bind_principal(session, principal)
+        yield session
+
+
 def _tid(principal: Principal) -> str:
     """Narrow principal.tenant_id to str for mypy; _principal guard ensures it's non-None."""
     assert principal.tenant_id is not None  # guaranteed by _principal dep
@@ -188,9 +196,7 @@ def _tid(principal: Principal) -> str:
 # ---- helpers ---------------------------------------------------------------
 async def load_tenant_limits(session: AsyncSession, tenant_id: str) -> dict[str, Any]:
     row = (
-        await session.execute(
-            select(tenants.c.limits).where(tenants.c.id == tenant_id)
-        )
+        await session.execute(select(tenants.c.limits).where(tenants.c.id == tenant_id))
     ).scalar_one_or_none()
     if row is None:
         raise not_found(f"tenant {tenant_id} not found")
@@ -215,6 +221,7 @@ def _preview_prompt(cfg: AgentConfig) -> str:
 def _row_to_container_out(row: Any) -> ContainerOut:
     return ContainerOut(
         id=row.id,
+        owner_user_id=getattr(row, "owner_user_id", None),
         name=row.name,
         external_id=row.external_id,
         metadata=row.metadata,
@@ -248,11 +255,12 @@ async def _resolve_create_config(
 
     if req.template_id is not None:
         trow = (
-            await session.execute(
-                select(templates).where(templates.c.id == req.template_id)
-            )
+            await session.execute(select(templates).where(templates.c.id == req.template_id))
         ).first()
-        if trow is None:
+        principal = session_principal(session)
+        if trow is None or (
+            principal is not None and trow.tenant_id not in (None, principal.tenant_id)
+        ):
             raise not_found(f"template {req.template_id} not found")
         template_id = trow.id
         base = {
@@ -278,9 +286,7 @@ async def _resolve_create_config(
         cfg: AgentConfig = req.config
     elif base is not None:
         if base["model"] is None:
-            raise validation_error(
-                "template has no model; provide config.model", field="model"
-            )
+            raise validation_error("template has no model; provide config.model", field="model")
         cfg = AgentConfig(**base)
     else:
         raise validation_error("provide either template_id or config", field="config")
@@ -288,9 +294,7 @@ async def _resolve_create_config(
     return cfg, template_id, tpl_runtime
 
 
-async def _load_owned_container(
-    session: AsyncSession, tenant_id: str, cid: str
-) -> Any:
+async def _load_owned_container(session: AsyncSession, tenant_id: str, cid: str) -> Any:
     row = (
         await session.execute(
             select(containers).where(
@@ -301,6 +305,7 @@ async def _load_owned_container(
     ).first()
     if row is None:
         raise not_found(f"container {cid} not found")
+    assert_container_access(row, session_principal(session))
     return row
 
 
@@ -334,8 +339,21 @@ async def create_container(
     """
     settings: Settings = request.app.state.settings
     tid = _tid(principal)
+    if (
+        body.external_id
+        and body.external_id.startswith("personal:")
+        and (getattr(request.state, "instance_binding_key", None) != body.external_id)
+    ):
+        raise validation_error("Reserved external id prefix", field="external_id")
     limits = await load_tenant_limits(session, tid)
 
+    if not is_manager(principal) and (body.volume_id or body.resources or body.image_tag):
+        raise api_error(403, "forbidden", "Custom volumes, host resources and images require admin")
+    visibility = body.visibility or ("private" if principal.user_id else "shared")
+    if visibility == "private" and principal.user_id is None:
+        raise api_error(403, "forbidden", "Private instances require a personal credential")
+    if visibility == "shared" and principal.user_id and not is_manager(principal):
+        raise api_error(403, "forbidden", "Only admins can create shared instances")
     config, template_id, tpl_runtime = await _resolve_create_config(session, body)
     # Raises validation_error before any Docker work.
     validate_config(config, limits)
@@ -370,6 +388,11 @@ async def create_container(
     else:
         stored_env = tpl_runtime.env_vars
 
+    # Reserve capacity in a short transaction before Docker work.
+    await session.execute(
+        sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
+        {"scope": "agentdock:containers:" + tid},
+    )
     # Total-provisioned cap (spec §4.4): every row not in 'destroyed'.
     count = (
         await session.execute(
@@ -389,6 +412,36 @@ async def create_container(
         raise api_error(
             409, "max_containers_reached", "Tenant has reached its container limit"
         ) from exc
+
+    live = (
+        await session.execute(
+            sa.select(sa.func.count())
+            .select_from(containers)
+            .where(
+                containers.c.tenant_id == tid,
+                containers.c.status.in_(("running", "provisioning", "resuming", "recovering")),
+            )
+        )
+    ).scalar_one()
+    if live >= int(limits["max_running_containers"]):
+        raise api_error(
+            503, "running_capacity_exhausted", "Pause an idle instance before creating another"
+        )
+    if visibility == "private":
+        owned = (
+            await session.execute(
+                sa.select(sa.func.count())
+                .select_from(containers)
+                .where(
+                    containers.c.tenant_id == tid,
+                    containers.c.owner_user_id == principal.user_id,
+                    containers.c.status != "destroyed",
+                )
+            )
+        ).scalar_one()
+        cap = int(limits["max_private_containers_per_user"])
+        if owned >= cap:
+            raise api_error(409, "private_instance_limit", "Personal instance limit reached")
 
     if body.external_id is not None:
         existing = (
@@ -413,13 +466,31 @@ async def create_container(
     max_workers = worker_cap_for_driver(limits, config.driver)
     reuse_volume = body.volume_id
 
-    # All statements so far are reads (limits, caps, external_id). Commit ends the
-    # transaction and returns this session's connection to the pool for the
-    # duration of the Docker work below — a cold provision can take minutes, and
-    # holding a checked-out connection across it starves the pool under
-    # concurrency (16 parallel cold creates exhausted the default 5+10 pool and
-    # 500'd unrelated requests). The insert below begins a fresh transaction.
-    await session.commit()
+    token = secrets.token_urlsafe(32)
+    resources: dict[str, Any] = dict(body.resources or {})
+    await session.execute(
+        containers.insert().values(
+            id=cid,
+            tenant_id=tid,
+            name=body.name,
+            owner_user_id=principal.user_id if visibility == "private" else None,
+            external_id=body.external_id,
+            metadata=body.metadata,
+            docker_name=docker_name_for(cid),
+            volume_name=reuse_volume or volume_name_for(cid),
+            shim_token=token,
+            image_tag=image_tag,
+            image_variant=variant,
+            template_id=template_id,
+            config=config.model_dump(),
+            status="provisioning",
+            resources=resources,
+            mem_limit=mem_limit,
+            cpus=cpus,
+            env_vars=stored_env,
+        )
+    )
+    await session.commit()  # release capacity lock and connection before Docker
 
     try:
         result = await provision_container(
@@ -432,57 +503,48 @@ async def create_container(
             cpus=cpus,
             reuse_volume_name=reuse_volume,
             extra_env=settings.agent_extra_env,
+            shim_token=token,
         )
-    except ReadinessFailed as exc:
-        # No row persisted; partial container+volume already cleaned up (spec §4.7).
-        raise APIError(503, "container_not_runnable", "container did not become ready") from exc
-
-    # Merge any host-accessible shim URL into resources so _shim_for can use it
-    # on hosts where Docker container names are not resolvable (e.g. macOS).
-    resources: dict[str, Any] = dict(body.resources or {})
-    if result.host_shim_url:
-        resources["_host_shim_url"] = result.host_shim_url
-
-    try:
+    except Exception as exc:
+        # Provisioner cleans partial resources; error rows remain diagnosable and
+        # count toward provisioned capacity until explicitly destroyed.
         await session.execute(
-            containers.insert().values(
-                id=cid,
-                tenant_id=tid,
-                name=body.name,
-                external_id=body.external_id,
-                metadata=body.metadata,
-                docker_name=result.docker_name,
-                volume_name=result.volume_name,
-                shim_token=result.shim_token,
-                image_tag=image_tag,
-                image_variant=variant,
-                template_id=template_id,
-                config=config.model_dump(),
-                status="running",
-                resources=resources,
-                mem_limit=mem_limit,
-                cpus=cpus,
-                env_vars=stored_env,
+            containers.update()
+            .where(containers.c.id == cid)
+            .values(
+                status="error",
+                error_message="Provisioning failed; inspect host runtime logs",
+                status_changed_at=sa.func.now(),
             )
         )
         await session.commit()
-    except IntegrityError as exc:
-        await session.rollback()
-        await destroy_container(
-            docker_name=result.docker_name,
-            volume_name=result.volume_name,
-            delete_volume=(reuse_volume is None),
-        )
-        raise APIError(
-            409,
-            "external_id_in_use",
-            "external_id already has a live container",
-            field="external_id",
-        ) from exc
+        if isinstance(exc, ReadinessFailed):
+            raise APIError(503, "container_not_runnable", "container did not become ready") from exc
+        raise
 
-    row = (
-        await session.execute(select(containers).where(containers.c.id == cid))
-    ).first()
+    if result.host_shim_url:
+        resources["_host_shim_url"] = result.host_shim_url
+    await session.execute(
+        containers.update()
+        .where(containers.c.id == cid)
+        .values(
+            status="running",
+            resources=resources,
+            status_changed_at=sa.func.now(),
+        )
+    )
+    await audit(
+        session,
+        actor_type="tenant",
+        actor_id=principal.user_id,
+        action="container.create",
+        target_type="container",
+        target_id=cid,
+        details={"tenant_id": tid, "visibility": visibility, "driver": config.driver},
+    )
+    await session.commit()
+
+    row = (await session.execute(select(containers).where(containers.c.id == cid))).first()
     return _row_to_container_out(row).model_dump()
 
 
@@ -510,7 +572,7 @@ async def list_containers(
     tenant are returned. Supply ``external_id`` and/or ``status`` to narrow the
     results.
     """
-    q = select(containers).where(containers.c.tenant_id == _tid(principal))
+    q = select(containers).where(visible_containers(principal))
     if external_id is not None:
         q = q.where(containers.c.external_id == external_id)
     if status is not None:
@@ -594,26 +656,32 @@ async def patch_config(
     # can't linger in the saved config (spec: opencode skills).
     if new_config.skills:
         owned = [
-            dict(r) for r in (
+            dict(r)
+            for r in (
                 await session.execute(
                     sa.select(skills_table.c.id).where(
                         skills_table.c.tenant_id == tid,
                         skills_table.c.id.in_(new_config.skills),
                     )
                 )
-            ).mappings().all()
+            )
+            .mappings()
+            .all()
         ]
         new_config.skills = filter_known_skill_ids(new_config.skills, owned)
     if new_config.mcp_servers:
         owned_mcp = [
-            dict(r) for r in (
+            dict(r)
+            for r in (
                 await session.execute(
                     sa.select(mcp_servers_table.c.id).where(
                         mcp_servers_table.c.tenant_id == tid,
                         mcp_servers_table.c.id.in_(new_config.mcp_servers),
                     )
                 )
-            ).mappings().all()
+            )
+            .mappings()
+            .all()
         ]
         new_config.mcp_servers = filter_known_mcp_server_ids(new_config.mcp_servers, owned_mcp)
     # Raises validation_error on bad config; applies to subsequent tasks only.
@@ -635,9 +703,7 @@ async def patch_config(
     )
 
     await session.execute(
-        containers.update()
-        .where(containers.c.id == cid)
-        .values(config=new_config.model_dump())
+        containers.update().where(containers.c.id == cid).values(config=new_config.model_dump())
     )
     await session.commit()
     preview = _preview_prompt(new_config)
@@ -691,12 +757,8 @@ async def put_container_env(
     """
     tid = _tid(principal)
     row = await _load_owned_container(session, tid, cid)
-    stored = store_env_vars(
-        [item.model_dump() for item in body], row.env_vars, load_key_from_env
-    )
-    await session.execute(
-        containers.update().where(containers.c.id == cid).values(env_vars=stored)
-    )
+    stored = store_env_vars([item.model_dump() for item in body], row.env_vars, load_key_from_env)
+    await session.execute(containers.update().where(containers.c.id == cid).values(env_vars=stored))
     # Names only — values (secret or not) never reach the audit log.
     await audit(
         session,
@@ -897,6 +959,8 @@ async def update_container_image(
     (container_not_updatable) if the container's state does not allow an update;
     422 (image_unavailable) if the target image cannot be pulled.
     """
+    if not is_manager(principal):
+        raise api_error(403, "forbidden", "Changing runtime images requires admin")
     tag = body.image_tag.strip()
     if not tag:
         raise validation_error("image_tag must not be empty")
@@ -1013,6 +1077,14 @@ async def resume_container(
         raise APIError(409, "container_not_runnable", f"cannot resume from '{row.status}'")
     docker_client = _docker(request)
     app_settings = _settings(request)
+    limits = await load_tenant_limits(session, _tid(principal))
+    await lifecycle.ensure_running_slot(
+        session,
+        docker_client,
+        _shim(request),
+        _tid(principal),
+        limit=int(limits["max_running_containers"]),
+    )
     await lifecycle.resume(session, docker_client, cid, settings=app_settings)
     await session.commit()
     return {"id": cid, "status": "running"}
@@ -1046,11 +1118,7 @@ async def recover_container(
         row = await _load_owned_container(session, principal.tenant_id, cid)
     else:
         # Staff: load without tenant filter.
-        row = (
-            await session.execute(
-                select(containers).where(containers.c.id == cid)
-            )
-        ).first()
+        row = (await session.execute(select(containers).where(containers.c.id == cid))).first()
         if row is None:
             raise not_found(f"container {cid} not found")
 
@@ -1064,6 +1132,14 @@ async def recover_container(
     docker_client = _docker(request)
     shim_client = _shim(request)
     app_settings = _settings(request)
+    limits = await load_tenant_limits(session, row.tenant_id)
+    await lifecycle.ensure_running_slot(
+        session,
+        docker_client,
+        shim_client,
+        row.tenant_id,
+        limit=int(limits["max_running_containers"]),
+    )
     await lifecycle.recover(
         session,
         docker_client,

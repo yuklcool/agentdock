@@ -53,6 +53,9 @@ class EnvVarOut(BaseModel):
 
 
 class CreateContainerRequest(BaseModel):
+    visibility: Literal["private", "shared"] | None = Field(
+        None, description="Defaults to private for a user, shared for a workspace API key."
+    )
     name: str = Field(
         description="Human-readable name for the agent container.", examples=["research-bot"]
     )
@@ -116,6 +119,7 @@ class CreateContainerRequest(BaseModel):
 
 
 class ContainerOut(BaseModel):
+    owner_user_id: str | None = None
     id: str = Field(description="Container (agent) id.")
     name: str = Field(description="Human-readable container name.")
     external_id: str | None = Field(description="Caller-supplied external reference key, if any.")

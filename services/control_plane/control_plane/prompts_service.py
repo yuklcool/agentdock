@@ -135,7 +135,7 @@ def resolve_body(
     for name, val in (values or {}).items():
         effective[name] = str(val)
 
-    def _sub(m: "re.Match[str]") -> str:
+    def _sub(m: re.Match[str]) -> str:
         repl = effective.get(m.group(1))
         return repl if repl else m.group(0)
 

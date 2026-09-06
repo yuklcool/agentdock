@@ -4,6 +4,7 @@ Mirrors routers/workflows.py / routers/prompts.py for session/principal handling
 A schedule fires a polymorphic ``target`` (prompt or workflow); the legacy
 container-scoped compatibility routes live at the bottom of this file (Task 20).
 """
+
 from __future__ import annotations
 
 import uuid as _uuid
@@ -17,6 +18,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from control_plane.access import (
+    bind_principal,
+    session_principal,
+    visible_containers,
+    visible_owner,
+    visible_steps,
+)
 from control_plane.auth.principal import Principal, resolve_principal
 from control_plane.errors import APIError, api_error, not_found
 from control_plane.ids import new_prompt_id, new_scheduled_task_id
@@ -40,6 +48,7 @@ class ScheduledTaskListResponse(BaseModel):
     scheduled_tasks: list[ScheduledTaskOut] = Field(
         description="The calling tenant's scheduled tasks, newest first."
     )
+
 
 _ST_COLS = [
     scheduled_tasks.c.id,
@@ -86,8 +95,7 @@ def _resolve_next_run(schedule: dict, timezone: str, run_at: str | None) -> date
             raise APIError(
                 400,
                 "validation_error",
-                "run_at is required for a one-time schedule (provide a new run_at to "
-                "re-enable)",
+                "run_at is required for a one-time schedule (provide a new run_at to re-enable)",
                 "run_at",
             )
         try:
@@ -122,6 +130,7 @@ async def _assert_target_exists(
                 select(containers.c.id).where(
                     containers.c.id == target["container_id"],
                     containers.c.tenant_id == tenant_id,
+                    visible_containers(session_principal(session)),
                 )
             )
         ).first()
@@ -135,6 +144,7 @@ async def _assert_target_exists(
         await session.execute(
             select(workflows.c.id).where(
                 workflows.c.id == target["workflow_id"],
+                visible_steps(workflows.c.steps, session_principal(session)),
                 workflows.c.tenant_id == tenant_id,
             )
         )
@@ -145,17 +155,20 @@ async def _assert_target_exists(
         )
 
 
-async def _load_owned_schedule(
-    session: AsyncSession, tenant_id: str, sid: str
-) -> dict[str, Any]:
+async def _load_owned_schedule(session: AsyncSession, tenant_id: str, sid: str) -> dict[str, Any]:
     row = (
-        await session.execute(
-            select(*_ST_COLS).where(
-                scheduled_tasks.c.id == sid,
-                scheduled_tasks.c.tenant_id == tenant_id,
+        (
+            await session.execute(
+                select(*_ST_COLS).where(
+                    scheduled_tasks.c.id == sid,
+                    scheduled_tasks.c.tenant_id == tenant_id,
+                    visible_schedule(session),
+                )
             )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     if row is None:
         raise not_found(f"scheduled task {sid} not found")
     return dict(row)
@@ -191,6 +204,10 @@ async def _do_create_scheduled_task(
         "tenant_id": tenant_id,
         "name": name,
         "target": target,
+        "run_as_user_id": session_principal(session).user_id
+        if session_principal(session)
+        else None,
+        "run_as_role": session_principal(session).role if session_principal(session) else "member",
         "schedule": schedule,
         "timezone": timezone,
         "enabled": True,
@@ -230,6 +247,9 @@ async def _do_update_scheduled_task(
             values["next_run_at"] = _resolve_next_run(schedule, timezone, run_at)
         except ValueError as exc:
             raise api_error(400, "validation_error", str(exc), "schedule") from exc
+    actor = session_principal(session)
+    values["run_as_user_id"] = actor.user_id if actor else None
+    values["run_as_role"] = actor.role if actor else "member"
     if values.get("enabled") is False:
         values["next_run_at"] = None
 
@@ -256,13 +276,21 @@ async def list_scheduled_tasks(
     principal's tenant, ordered by creation time descending.
     """
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         rows = (
-            await session.execute(
-                select(*_ST_COLS)
-                .where(scheduled_tasks.c.tenant_id == principal.tenant_id)
-                .order_by(scheduled_tasks.c.created_at.desc())
+            (
+                await session.execute(
+                    select(*_ST_COLS)
+                    .where(
+                        scheduled_tasks.c.tenant_id == principal.tenant_id,
+                        visible_schedule(session),
+                    )
+                    .order_by(scheduled_tasks.c.created_at.desc())
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
     return {"scheduled_tasks": [_row_to_out(dict(r)).model_dump() for r in rows]}
 
 
@@ -292,6 +320,7 @@ async def create_scheduled_task(
     target = validate_target(payload.target)
 
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         return await _do_create_scheduled_task(
             session,
             tenant_id=principal.tenant_id,
@@ -315,6 +344,7 @@ async def get_scheduled_task(
     schedule with ``sid`` belongs to the tenant.
     """
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         return _row_to_out(
             await _load_owned_schedule(session, principal.tenant_id, sid)
         ).model_dump()
@@ -338,6 +368,7 @@ async def update_scheduled_task(
     """
     patch = UpdateScheduledTaskRequest(**(await request.json()))
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         existing = await _load_owned_schedule(session, principal.tenant_id, sid)
 
         values: dict[str, Any] = {"updated_at": datetime.now(UTC)}
@@ -389,6 +420,7 @@ async def delete_scheduled_task(
     schedule does not exist for the tenant.
     """
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         await _load_owned_schedule(session, principal.tenant_id, sid)
         await session.execute(
             sa.delete(scheduled_tasks).where(
@@ -535,6 +567,7 @@ async def legacy_create_scheduled_task(
     # Note: validate_schedule is NOT called here — _do_create_scheduled_task
     # calls _resolve_next_run which validates once on the happy path.
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         pid = await _create_adhoc_prompt(
             session, principal.tenant_id, name, prompt_text, principal.user_id
         )
@@ -584,6 +617,7 @@ async def legacy_update_scheduled_task(
     task_body: dict[str, Any] | None = payload.get("task_body")
 
     async with request.app.state.session_factory() as session:
+        bind_principal(session, principal)
         existing = await _load_owned_schedule(session, principal.tenant_id, sid)
 
         values: dict[str, Any] = {"updated_at": datetime.now(UTC)}
@@ -636,3 +670,32 @@ async def legacy_update_scheduled_task(
     resp = JSONResponse(result)
     _legacy_headers(resp)
     return resp
+
+
+def visible_schedule(session: Any) -> Any:
+    principal = session_principal(session)
+    target = scheduled_tasks.c.target
+    return (
+        sa.and_(
+            visible_owner(scheduled_tasks.c.run_as_user_id, principal),
+            sa.or_(
+                sa.and_(
+                    target["kind"].astext == "prompt",
+                    target["container_id"].astext.in_(
+                        sa.select(containers.c.id).where(visible_containers(principal))
+                    ),
+                ),
+                sa.and_(
+                    target["kind"].astext == "workflow",
+                    target["workflow_id"].astext.in_(
+                        sa.select(workflows.c.id).where(
+                            workflows.c.tenant_id == principal.tenant_id,
+                            visible_steps(workflows.c.steps, principal),
+                        )
+                    ),
+                ),
+            ),
+        )
+        if principal
+        else sa.true()
+    )

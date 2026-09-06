@@ -71,6 +71,7 @@ containers = Table(
     Column("name", Text, nullable=False),
     Column("external_id", Text, nullable=True),
     Column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("owner_user_id", Text, ForeignKey("users.id"), nullable=True),
     Column("docker_name", Text, nullable=False, unique=True),
     Column("volume_name", Text, nullable=False, unique=True),
     Column("shim_token", Text, nullable=False),
@@ -117,6 +118,7 @@ Index(
 
 tasks = Table(
     "tasks", metadata,
+    Column("submitted_by", Text, ForeignKey("users.id"), nullable=True),
     Column("id", Text, primary_key=True),
     Column("tenant_id", Text, ForeignKey("tenants.id"), nullable=False),
     Column("container_id", Text, ForeignKey("containers.id"), nullable=False),
@@ -151,6 +153,8 @@ Index("idx_tasks_session", tasks.c.session_id)
 
 scheduled_tasks = Table(
     "scheduled_tasks", metadata,
+    Column("run_as_user_id", Text, ForeignKey("users.id"), nullable=True),
+    Column("run_as_role", Text, nullable=False, server_default=text("'member'")),
     Column("id", Text, primary_key=True),
     Column("tenant_id", Text, ForeignKey("tenants.id"), nullable=False),
     Column("name", Text, nullable=False),
@@ -319,6 +323,8 @@ Index("idx_workflows_tenant_name", workflows.c.tenant_id, workflows.c.name, uniq
 
 workflow_runs = Table(
     "workflow_runs", metadata,
+    Column("run_as_user_id", Text, ForeignKey("users.id"), nullable=True),
+    Column("run_as_role", Text, nullable=False, server_default=text("'member'")),
     Column("id", Text, primary_key=True),
     Column("workflow_id", Text, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False),
     Column("tenant_id", Text, nullable=False),
@@ -371,3 +377,21 @@ audit_log = Table(
     Column("ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
 )
 Index("idx_audit_ts", audit_log.c.ts.desc())
+
+
+user_agent_bindings = Table(
+    "user_agent_bindings", metadata,
+    Column("tenant_id", Text, ForeignKey("tenants.id"), primary_key=True),
+    Column("user_id", Text, ForeignKey("users.id"), primary_key=True),
+    Column("template_id", Text, ForeignKey("templates.id"), primary_key=True),
+    Column("container_id", Text, ForeignKey("containers.id", ondelete="SET NULL")),
+    Column("lease_id", Text, nullable=False),
+    Column("lease_until", TIMESTAMP(timezone=True), nullable=False),
+    Column("status", Text, nullable=False),
+    Column("created_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
+    Column("updated_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("status IN ('provisioning', 'ready', 'error')", name="binding_status"),
+)
+Index("idx_containers_owner", containers.c.tenant_id, containers.c.owner_user_id)
+
+Index("idx_tasks_actor_date", tasks.c.tenant_id, tasks.c.submitted_by, tasks.c.created_at)

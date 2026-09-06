@@ -79,6 +79,8 @@ def _wire_events(monkeypatch, *, runs, status, steps=None, submit=None, timeout=
     """Capture (rid, values, event) passed to _apply_run_update."""
     applied = []
 
+    # Target ACL is covered against PostgreSQL in test_private_instances.py.
+    monkeypatch.setattr(eng, "assert_target_access", _const(None))
     monkeypatch.setattr(eng, "_claim_active_runs", _aiter(runs))
     monkeypatch.setattr(eng, "_task_status", _const((status, timeout)))
     monkeypatch.setattr(eng, "_load_workflow_steps",

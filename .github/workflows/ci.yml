@@ -1,12 +1,13 @@
 name: CI
 
-# Auto-runs are paused (manual-only). Re-enable by restoring the push/
-# pull_request triggers below; run on demand via Actions → Run workflow.
 on:
   workflow_dispatch:
-  # push:
-  #   branches: ["**"]
-  # pull_request:
+  push:
+    branches: [main, feat/private-instances-governance]
+  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   lint-and-unit:
@@ -16,39 +17,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install agentcore (editable, with dev tools)
+      - name: Install all service test dependencies
+        run: pip install -e 'packages/agentcore[dev]' -e 'services/shim[dev]' -e 'services/control_plane[dev]' -e 'services/connectors[dev]'
+      - run: ruff check .
+      - run: mypy packages/agentcore/agentcore
+      - name: Unit suites (separate test namespaces)
         run: |
-          python -m pip install --upgrade pip
-          pip install -e "packages/agentcore[dev]"
-      - name: Ruff
-        run: ruff check .
-      - name: Mypy
-        run: mypy packages/agentcore/agentcore
-      - name: Unit tests
-        run: pytest -m unit -q
-
-  integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install agentcore (editable, with dev tools)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e "packages/agentcore[dev]"
-      - name: Validate test compose file
-        run: docker compose -f deploy/docker-compose.test.yml config -q
-      - name: Bring up the test stack
-        run: docker compose -f deploy/docker-compose.test.yml up -d --wait
-      - name: Integration tests (require a real docker daemon)
-        env:
-          REQUIRE_DOCKER: "1"
-        run: pytest -m integration -q
-      - name: Tear down the test stack
-        if: always()
-        run: docker compose -f deploy/docker-compose.test.yml down -v
+          PYTHONPATH=packages/agentcore pytest -m unit -q packages/agentcore/tests
+          PYTHONPATH=services/control_plane:services/control_plane/tests pytest -m unit -q services/control_plane/tests
+          PYTHONPATH=services/shim pytest -m unit -q services/shim/tests
+          PYTHONPATH=services/connectors pytest -m unit -q services/connectors/tests
 
   web-console:
     runs-on: ubuntu-latest
@@ -59,9 +37,35 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-      - run: npm ci || npm install
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/console/package-lock.json
+      - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  integration:
+    # Broader legacy service integration is still available on manual runs.
+    # Automatic Nanobot/Postgres/backup integration lives in nanobot.yml.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e 'packages/agentcore[dev]' -e 'services/shim[dev]' -e 'services/control_plane[dev]' -e 'services/connectors[dev]'
+      - run: docker compose -f deploy/docker-compose.test.yml config -q
+      - run: docker compose -f deploy/docker-compose.test.yml up -d --wait
+      - name: Legacy integration suites
+        env:
+          REQUIRE_DOCKER: "1"
+        run: |
+          PYTHONPATH=packages/agentcore pytest -m integration -q packages/agentcore/tests
+          PYTHONPATH=services/control_plane:services/control_plane/tests pytest -m integration -q services/control_plane/tests
+          PYTHONPATH=services/shim pytest -m integration -q services/shim/tests
+          PYTHONPATH=services/connectors pytest -m integration -q services/connectors/tests
+      - if: always()
+        run: docker compose -f deploy/docker-compose.test.yml down -v

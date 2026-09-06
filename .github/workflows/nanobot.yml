@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-    branches: [main, feat/nanobot-integration]
+    branches: [main, feat/nanobot-integration, feat/private-instances-governance]
 
 permissions:
   contents: read
@@ -23,9 +23,9 @@ jobs:
         run: |
           PYTHONPATH=packages/agentcore pytest -q packages/agentcore/tests/drivers/test_nanobot.py packages/agentcore/tests/drivers/conformance/test_meta.py
           PYTHONPATH=packages/agentcore pytest -q packages/agentcore/tests/drivers/conformance/test_conformance.py -k nanobot
-      - name: Control plane routing and model policy
+      - name: Complete control plane unit suite
         run: |
-          PYTHONPATH=services/control_plane:services/control_plane/tests pytest -q services/control_plane/tests/test_nanobot_ws.py services/control_plane/tests/test_model_catalog.py services/control_plane/tests/test_tenant_defaults.py
+          PYTHONPATH=services/control_plane:services/control_plane/tests pytest -q -m unit services/control_plane/tests
       - name: Shim driver registration
         run: PYTHONPATH=services/shim pytest -q services/shim/tests/test_main_drivers.py
 
@@ -73,3 +73,45 @@ jobs:
               /opt/venv/bin/python -m pip install pytest pytest-asyncio
               /opt/venv/bin/python -m pytest -q -o asyncio_mode=auto /tests/test_nanobot_live.py
             '
+      - name: Three isolated gateways, pause/resume and volume recreation
+        run: python scripts/test_nanobot_instances.py --image agentdock-agent:test
+
+  governance-database:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agentdock
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: agentdock_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agentdock -d agentdock_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://agentdock:test-only@localhost:5432/agentdock_test
+      AGENTDOCK_TEST_DATABASE_URL: postgresql+asyncpg://agentdock:test-only@localhost:5432/agentdock_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e 'packages/agentcore[dev]' -e 'services/control_plane[dev]'
+      - name: Upgrade the real migration chain
+        working-directory: services/control_plane
+        run: alembic upgrade head
+      - name: User isolation, workflow targets and concurrent budget reservations
+        run: PYTHONPATH=services/control_plane:services/control_plane/tests pytest -q services/control_plane/tests/test_private_instances.py
+
+  backup-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y age
+      - run: docker pull alpine:3.21 && docker pull postgres:16
+      - run: python scripts/test_backup.py

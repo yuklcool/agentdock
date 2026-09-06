@@ -18,14 +18,17 @@ def _script(d):
 def _run_argv_stub(name, script, cwd):
     return subprocess.run(
         [os.path.join(STUBS, name), "--", _script(script)],
-        capture_output=True, text=True, cwd=cwd,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
     )
 
 
 def test_opencode_success_parses_to_text_and_usage(tmp_path):
-    script = {"turns": [{"text": "the answer",
-                         "done": {"success": True, "output": "the answer"}}],
-              "usage": {"input_tokens": 11, "output_tokens": 4}}
+    script = {
+        "turns": [{"text": "the answer", "done": {"success": True, "output": "the answer"}}],
+        "usage": {"input_tokens": 11, "output_tokens": 4},
+    }
     proc = _run_argv_stub("opencode", script, str(tmp_path))
     assert proc.returncode == 0, proc.stderr
     last_text, tin, tout = None, 0, 0
@@ -46,16 +49,21 @@ def test_opencode_error_exits_nonzero_with_error_event(tmp_path):
     script = {"turns": [{"done": {"success": False, "reason": "boom"}}]}
     proc = _run_argv_stub("opencode", script, str(tmp_path))
     assert proc.returncode != 0
-    msgs = [oc.event_error(oc.parse_opencode_line(l)[1])
-            for l in proc.stdout.splitlines()
-            if oc.parse_opencode_line(l)[0] == "event"]
+    msgs = [
+        oc.event_error(oc.parse_opencode_line(line)[1])
+        for line in proc.stdout.splitlines()
+        if oc.parse_opencode_line(line)[0] == "event"
+    ]
     assert "boom" in [m for m in msgs if m]
 
 
 def test_opencode_writes_workspace_file(tmp_path):
-    script = {"turns": [{"tool": "write_file",
-                         "input": {"path": "out.md", "content": "X"}},
-                        {"done": {"success": True, "output": "ok"}}]}
+    script = {
+        "turns": [
+            {"tool": "write_file", "input": {"path": "out.md", "content": "X"}},
+            {"done": {"success": True, "output": "ok"}},
+        ]
+    }
     proc = _run_argv_stub("opencode", script, str(tmp_path))
     assert proc.returncode == 0, proc.stderr
     assert (tmp_path / "out.md").read_text() == "X"
@@ -67,13 +75,18 @@ from agentcore.drivers import codex as cx  # noqa: E402
 def _run_stdin_stub(name, script, cwd):
     return subprocess.run(
         [os.path.join(STUBS, name)],
-        input=_script(script), capture_output=True, text=True, cwd=cwd,
+        input=_script(script),
+        capture_output=True,
+        text=True,
+        cwd=cwd,
     )
 
 
 def test_codex_success_parses_to_text_and_usage(tmp_path):
-    script = {"turns": [{"done": {"success": True, "output": "done text"}}],
-              "usage": {"input_tokens": 9, "output_tokens": 3}}
+    script = {
+        "turns": [{"done": {"success": True, "output": "done text"}}],
+        "usage": {"input_tokens": 9, "output_tokens": 3},
+    }
     proc = _run_stdin_stub("codex", script, str(tmp_path))
     assert proc.returncode == 0, proc.stderr
     last_text, tin, tout = None, 0, 0
@@ -94,9 +107,11 @@ def test_codex_error_turn_failed(tmp_path):
     script = {"turns": [{"done": {"success": False, "reason": "nope"}}]}
     proc = _run_stdin_stub("codex", script, str(tmp_path))
     assert proc.returncode != 0
-    errs = [cx.event_error(cx.parse_codex_line(l)[1])
-            for l in proc.stdout.splitlines()
-            if cx.parse_codex_line(l)[0] == "event"]
+    errs = [
+        cx.event_error(cx.parse_codex_line(line)[1])
+        for line in proc.stdout.splitlines()
+        if cx.parse_codex_line(line)[0] == "event"
+    ]
     assert "nope" in [e for e in errs if e]
 
 
@@ -104,8 +119,10 @@ from agentcore.drivers import claude_code as cc  # noqa: E402
 
 
 def test_claude_success_parses_to_text_and_usage(tmp_path):
-    script = {"turns": [{"done": {"success": True, "output": "final"}}],
-              "usage": {"input_tokens": 6, "output_tokens": 2}}
+    script = {
+        "turns": [{"done": {"success": True, "output": "final"}}],
+        "usage": {"input_tokens": 6, "output_tokens": 2},
+    }
     proc = _run_stdin_stub("claude", script, str(tmp_path))
     assert proc.returncode == 0, proc.stderr
     last_text, tin, tout = None, 0, 0
@@ -125,8 +142,10 @@ def test_claude_success_parses_to_text_and_usage(tmp_path):
 def test_claude_is_error_result(tmp_path):
     script = {"turns": [{"done": {"success": False, "reason": "bad"}}]}
     proc = _run_stdin_stub("claude", script, str(tmp_path))
-    errs = [cc.result_error(cc.parse_claude_line(l)[1])
-            for l in proc.stdout.splitlines()
-            if cc.parse_claude_line(l)[0] == "event"]
+    errs = [
+        cc.result_error(cc.parse_claude_line(line)[1])
+        for line in proc.stdout.splitlines()
+        if cc.parse_claude_line(line)[0] == "event"
+    ]
     assert proc.returncode == 0  # claude exits 0 even on error; failure is signalled via is_error
     assert "bad" in [e for e in errs if e]

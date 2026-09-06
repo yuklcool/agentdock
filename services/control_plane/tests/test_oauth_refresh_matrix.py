@@ -279,7 +279,7 @@ _FAKE_CRED_ROWS: list[dict[str, Any]] = [
         "oauth_metadata": {"account_id": _ANT_ACCOUNT},
         "token_expires_at": None,
         "created_by": None,
-        "created_at": None,
+        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
         # Extra secret fields that MUST be stripped by the router projection.
         # Seeding them in the row means a projection regression immediately
         # exposes them in the response and the assertion below catches it.
@@ -296,7 +296,7 @@ _FAKE_CRED_ROWS: list[dict[str, Any]] = [
         "oauth_metadata": {"account_id": _OAI_ACCOUNT},
         "token_expires_at": None,
         "created_by": None,
-        "created_at": None,
+        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
         "access_token": _OAI_ACCESS,
         "refresh_token": _OAI_REFRESH,
         "key_ciphertext": b"CIPHER-LEAKTEST-oai-bytes",

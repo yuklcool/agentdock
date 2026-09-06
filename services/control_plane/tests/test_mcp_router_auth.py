@@ -47,7 +47,7 @@ class _FakeSession:
     def __init__(self, rows: list[Any]) -> None:
         self._rows = rows
 
-    async def __aenter__(self) -> "_FakeSession":
+    async def __aenter__(self) -> _FakeSession:
         return self
 
     async def __aexit__(self, *exc: Any) -> bool:

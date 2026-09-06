@@ -55,3 +55,18 @@ test("a failed keys query surfaces the API error instead of a fake empty list", 
   expect(screen.getByText(/Select a workspace to view its API keys/)).toBeInTheDocument();
   expect(screen.queryByText("No API keys yet")).not.toBeInTheDocument();
 });
+
+test("personal keys use only the user-scoped endpoint", async () => {
+  server.use(http.get("/v1/me/api-keys", () => HttpResponse.json({ keys: [] })));
+  let created = false;
+  server.use(http.post("/v1/me/api-keys", () => {
+    created = true;
+    return HttpResponse.json({ id: "mine", name: "personal", key: "tk_live_PERSONAL", prefix: "tk_live_", created_at: "2026-09-06T00:00:00Z" });
+  }));
+  renderWithProviders(<ApiKeys personal />);
+  await userEvent.click(await screen.findByRole("button", { name: /New key/i }));
+  await userEvent.type(screen.getByLabelText(/name/i), "personal");
+  await userEvent.click(screen.getByRole("button", { name: /Create/i }));
+  expect(await screen.findByText("tk_live_PERSONAL")).toBeInTheDocument();
+  expect(created).toBe(true);
+});

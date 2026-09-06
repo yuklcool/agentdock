@@ -40,6 +40,8 @@ def task_payload():
         "config": {"driver": "vanilla", "model": "m"},
         "limits": {"max_iterations": 5, "max_tokens": 1000, "timeout_seconds": 30},
         "llm_credential": "sk-secret",
+        # These tests assert driver event replay. Git hook events are tested in test_app_git.
+        "git_snapshots": False,
     }
 
 
