@@ -22,7 +22,13 @@ AgentDock 为独立运行的 Nanobot 提供容器管理、持久工作空间、�
 
 ---
 
-## Nanobot 快速入口
+## Docker 镜像快速部署
+
+无需在服务器构建源码，使用完整镜像发行包启动，见 [镜像部署指南](deploy/quickstart/README.md)。
+镜像前缀为 `ghcr.io/yuklcool/agentdock`，包含后台、数据库、代理和 Nanobot 运行镜像。
+首次生成随机密钥后，执行 `docker compose --profile images pull` 和 `docker compose up -d --no-build --wait`。
+
+## Nanobot 源码开发入口
 
 先阅读 [AgentDock Nanobot 集成指南](docs/NANOBOT.md)，了解部署步骤、会话持久化、
 `/v1/ws` 消息协议、MCP/Skill 配置和当前版本边界。

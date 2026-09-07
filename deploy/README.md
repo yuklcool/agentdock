@@ -1,5 +1,7 @@
 # AgentDock 部署指南
 
+无需本机构建的完整发行版请使用 [镜像快速部署](quickstart/README.md)，只需 Docker Compose 与首次配置脚本。下文为源码构建部署。
+
 当前 Agent 镜像复用阿里云预构建 Nanobot 0.3.0 / Node 24，并叠加 AgentDock 管理层（已验证 amd64）。创建实例时选择 Nanobot 驱动，配置与接入方法见 [Nanobot 集成指南](../docs/NANOBOT.md)。
 
 # Deploy: single-host topology

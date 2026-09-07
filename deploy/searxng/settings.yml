@@ -51,7 +51,8 @@ server:
   secret_key: "change-me-in-env"
   limiter: false          # no rate limiter for the trusted internal caller
   image_proxy: false
-  bind_address: "0.0.0.0:8080"
+  bind_address: "0.0.0.0"
+  port: 8080
 
 ui:
   static_use_hash: true

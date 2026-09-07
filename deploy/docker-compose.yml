@@ -138,7 +138,10 @@ services:
     image: agent-runtime/web-console:dev
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.console.rule=Host(`localhost`)"
+      - "traefik.http.routers.console.rule=Host(`${PUBLIC_HOST}`)"
+      - "traefik.http.routers.console.entrypoints=websecure"
+      - "traefik.http.routers.console.tls=true"
+      - "traefik.http.routers.console.tls.certresolver=default"
       - "traefik.http.routers.console.priority=1"
       - "traefik.http.services.console.loadbalancer.server.port=80"
     networks:
