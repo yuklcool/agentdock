@@ -5,6 +5,8 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import subprocess
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -31,8 +33,16 @@ def main():
         with client.open(req, timeout=120) as response:
             return response.read()
 
-    assert b"AgentDock" in request("/")
-    assert json.loads(request("/healthz"))["status"] == "ok"
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            assert json.loads(request("/healthz"))["status"] == "ok"
+            break
+        except urllib.error.URLError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.5)
+    assert b"agentdock" in request("/").lower()
     user = json.loads(
         request(
             "/v1/auth/login",
@@ -42,7 +52,8 @@ def main():
             },
         )
     )
-    assert user["is_staff"] and user["must_change_password"]
+    assert user["must_change_password"]
+    assert json.loads(request("/v1/auth/me"))["is_staff"]
     request("/v1/auth/select-tenant", {"tenant_id": "ten_seed"})
     container = json.loads(
         request(
