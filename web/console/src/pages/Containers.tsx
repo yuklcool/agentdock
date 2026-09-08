@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useContainers, useLifecycle } from "../api/queries";
+import { useContainers, useLifecycle, useUsers } from "../api/queries";
 import { useAuth } from "../auth/useAuth";
 import { ContainerBadge } from "../components/StatusBadge";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -24,7 +24,7 @@ const FILTER_OPTIONS: { value: Filter; label: string }[] = [
   { value: "error", label: "Errored" },
 ];
 
-function Row({ c, isAdmin }: { c: Container; isAdmin: boolean }) {
+function Row({ c, isAdmin, ownerLabel }: { c: Container; isAdmin: boolean; ownerLabel: string }) {
   const lc = useLifecycle(c.id);
   const toast = useToast();
   const navigate = useNavigate();
@@ -74,6 +74,7 @@ function Row({ c, isAdmin }: { c: Container; isAdmin: boolean }) {
           </div>
         </td>
         <td><ContainerBadge status={c.status} /></td>
+        {isAdmin && <td style={{ maxWidth: 260, overflowWrap: "anywhere" }}>{ownerLabel}</td>}
         <td>
           <div>{c.config.driver}</div>
           <div className="id">{c.config.model}</div>
@@ -147,6 +148,14 @@ function Row({ c, isAdmin }: { c: Container; isAdmin: boolean }) {
 export default function Containers() {
   const { user } = useAuth();
   const admin = isAdmin(user);
+  const usersQuery = useUsers(admin);
+  const ownerLabel = (c: Container) => {
+    if (!c.owner_user_id) return "Shared";
+    const owner = usersQuery.data?.users.find((u) => u.id === c.owner_user_id);
+    if (owner) return `${owner.name} <${owner.email}>`;
+    if (c.owner_user_id === user?.id) return `${user.name} <${user.email}>`;
+    return c.owner_user_id;
+  };
   const { data, isLoading } = useContainers();
   const containers = data?.containers ?? [];
   const [filter, setFilter] = useState<Filter>("all");
@@ -210,6 +219,7 @@ export default function Containers() {
             <tr>
               <th>External id</th>
               <th>Status</th>
+              {admin && <th>Owner user</th>}
               <th>Driver / model</th>
               <th>Variant</th>
               <th>Tasks</th>
@@ -219,11 +229,11 @@ export default function Containers() {
           </thead>
           <tbody>
             {filtered.map((c) => (
-              <Row key={c.id} c={c} isAdmin={admin} />
+              <Row key={c.id} c={c} isAdmin={admin} ownerLabel={ownerLabel(c)} />
             ))}
             {filtered.length === 0 && (
               <EmptyRow
-                colSpan={7}
+                colSpan={admin ? 8 : 7}
                 icon="Container"
                 title={containers.length === 0 ? "No containers yet" : "No matching containers"}
                 description={

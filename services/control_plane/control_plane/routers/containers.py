@@ -19,6 +19,7 @@ from agentcore.models import AgentConfig, ResolvedLimits, TaskBody
 from agentcore.prompt import assemble_system_prompt
 from agentcore.tools.base import TOOLS
 from control_plane import lifecycle
+from control_plane import tables as auth_tables
 from control_plane.access import (
     assert_container_access,
     bind_principal,
@@ -354,6 +355,14 @@ async def create_container(
         raise api_error(403, "forbidden", "Private instances require a personal credential")
     if visibility == "shared" and principal.user_id and not is_manager(principal):
         raise api_error(403, "forbidden", "Only admins can create shared instances")
+    if body.owner_user_id is not None:
+        if not is_manager(principal):
+            raise api_error(403, "forbidden", "Only admins can specify a container owner")
+        if visibility != "private":
+            raise validation_error(
+                "An owner can only be assigned to a private instance", "owner_user_id"
+            )
+    effective_owner_user_id = principal.user_id if visibility == "private" else None
     config, template_id, tpl_runtime = await _resolve_create_config(session, body)
     # Raises validation_error before any Docker work.
     validate_config(config, limits)
@@ -394,6 +403,27 @@ async def create_container(
         {"scope": "agentdock:containers:" + tid},
     )
     # Total-provisioned cap (spec §4.4): every row not in 'destroyed'.
+    if body.owner_user_id is not None:
+        users, memberships = auth_tables.users, auth_tables.memberships
+        target = (
+            await session.execute(
+                sa.select(users.c.id)
+                .select_from(users.join(memberships, memberships.c.user_id == users.c.id))
+                .where(
+                    users.c.id == body.owner_user_id,
+                    users.c.status == "active",
+                    users.c.is_staff.is_(False),
+                    memberships.c.tenant_id == tid,
+                    memberships.c.status == "active",
+                )
+                .with_for_update(of=[users, memberships])
+            )
+        ).scalar_one_or_none()
+        if target is None:
+            raise validation_error(
+                "Owner must be an active member of this workspace", "owner_user_id"
+            )
+        effective_owner_user_id = target
     count = (
         await session.execute(
             sa.select(sa.func.count())
@@ -434,7 +464,7 @@ async def create_container(
                 .select_from(containers)
                 .where(
                     containers.c.tenant_id == tid,
-                    containers.c.owner_user_id == principal.user_id,
+                    containers.c.owner_user_id == effective_owner_user_id,
                     containers.c.status != "destroyed",
                 )
             )
@@ -473,7 +503,7 @@ async def create_container(
             id=cid,
             tenant_id=tid,
             name=body.name,
-            owner_user_id=principal.user_id if visibility == "private" else None,
+            owner_user_id=effective_owner_user_id,
             external_id=body.external_id,
             metadata=body.metadata,
             docker_name=docker_name_for(cid),
@@ -540,7 +570,10 @@ async def create_container(
         action="container.create",
         target_type="container",
         target_id=cid,
-        details={"tenant_id": tid, "visibility": visibility, "driver": config.driver},
+        details={
+            "tenant_id": tid, "visibility": visibility, "driver": config.driver,
+            "owner_user_id": effective_owner_user_id,
+        },
     )
     await session.commit()
 

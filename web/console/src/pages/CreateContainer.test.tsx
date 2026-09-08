@@ -19,9 +19,12 @@ function tpl(over: Partial<any> = {}) {
     available_tool_specs: [], ...over };
 }
 
-function setupAuth() {
+function setupAuth(role = "admin") {
+  server.use(http.get("/v1/users", () => HttpResponse.json({ users: [
+    { id: "alice", name: "Alice", email: "alice@example.com", role: "member", status: "active" },
+  ] })));
   server.use(http.get("/v1/auth/me", () => HttpResponse.json({
-    id: "u", tenant_id: "t", name: "D", email: "d@x.io", role: "admin", is_staff: false, must_change_password: false,
+    id: "u", tenant_id: "t", name: "D", email: "d@x.io", role, is_staff: false, must_change_password: false,
     tenant: { id: "t", name: "A", limits: { allowed_drivers: ["vanilla"], default_max_iterations: 30, default_max_tokens: 200000, default_task_timeout_seconds: 1800, max_concurrent_tasks_per_container: 4 } },
   })));
   server.use(http.get("/v1/models", () => HttpResponse.json({ models: [
@@ -236,4 +239,50 @@ test("inherited template secret blocks create until replaced with a typed value"
   await user.click(screen.getByRole("button", { name: /Create container/i }));
   await waitFor(() => expect(posted).not.toBeNull());
   expect(posted.env_vars).toEqual([{ name: "KEY", value: "s3cr3t", secret: true }]);
+});
+
+
+describe("Container ownership", () => {
+  it("submits an explicitly selected workspace user as private owner", async () => {
+    setupAuth();
+    server.use(http.get("/v1/templates", () => HttpResponse.json({ templates: [tpl()] })));
+    let posted: any = null;
+    let ownerQuery = false;
+    server.use(http.get("/v1/users", ({ request }) => {
+      ownerQuery = new URL(request.url).searchParams.get("eligible_owner") === "true";
+      return HttpResponse.json({ users: [
+        { id: "alice", name: "Alice", email: "alice@example.com", role: "member", status: "active" },
+      ] });
+    }));
+    server.use(http.post("/v1/containers", async ({ request }) => {
+      posted = await request.json(); return HttpResponse.json({ id: "con_owned" });
+    }));
+    renderWithProviders(<AuthProvider><CreateContainer /></AuthProvider>);
+    await userEvent.type(await screen.findByLabelText(/^Name$/), "alice-agent");
+    const picker = await screen.findByLabelText("Owner user");
+    await waitFor(() => expect(picker).toBeEnabled());
+    await userEvent.click(picker);
+    await userEvent.click(screen.getByRole("option", { name: /Alice/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Create container" }));
+    await waitFor(() => expect(posted).toMatchObject({ owner_user_id: "alice", visibility: "private" }));
+    expect(ownerQuery).toBe(true);
+  });
+
+  it("keeps member creation unchanged and does not load workspace users", async () => {
+    setupAuth("member");
+    let userRequests = 0;
+    server.use(http.get("/v1/users", () => { userRequests++; return HttpResponse.json({ users: [] }); }));
+    server.use(http.get("/v1/templates", () => HttpResponse.json({ templates: [tpl()] })));
+    let posted: any = null;
+    server.use(http.post("/v1/containers", async ({ request }) => {
+      posted = await request.json(); return HttpResponse.json({ id: "con_self" });
+    }));
+    renderWithProviders(<AuthProvider><CreateContainer /></AuthProvider>);
+    await userEvent.type(await screen.findByLabelText(/^Name$/), "my-agent");
+    expect(screen.queryByLabelText("Owner user")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create container" }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted).not.toHaveProperty("owner_user_id");
+    expect(userRequests).toBe(0);
+  });
 });
