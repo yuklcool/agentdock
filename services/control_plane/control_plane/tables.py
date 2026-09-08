@@ -96,6 +96,7 @@ credentials = sa.Table(
     sa.Column("provider", sa.Text, nullable=False),
     sa.Column("key_ciphertext", sa.LargeBinary, nullable=True),
     sa.Column("key_last4", sa.Text, nullable=True),
+    sa.Column("base_url", sa.Text, nullable=True),
     sa.Column("auth_method", sa.Text, nullable=False, server_default="api_key"),
     sa.Column("access_token_ciphertext", sa.LargeBinary, nullable=True),
     sa.Column("refresh_token_ciphertext", sa.LargeBinary, nullable=True),

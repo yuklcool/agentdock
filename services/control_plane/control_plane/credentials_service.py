@@ -75,6 +75,7 @@ def build_credential_row(
     api_key: str,
     created_by: str | None,
     master_key: bytes,
+    base_url: str | None = None,
 ) -> dict:  # type: ignore[type-arg]
     now = datetime.now(UTC)
     return {
@@ -85,6 +86,7 @@ def build_credential_row(
         "status": "active",
         "key_ciphertext": encrypt_secret(api_key, master_key),
         "key_last4": last4(api_key),
+        "base_url": base_url,
         "created_by": created_by,
         "created_at": now,
         "updated_at": now,

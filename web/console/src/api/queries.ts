@@ -307,7 +307,16 @@ export function useCreateApiKey(personal = false) {
 export function useSetCredential() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: { provider: string; api_key: string }) => api.post<Credential>("/v1/credentials", b),
+    mutationFn: (b: { provider: string; api_key: string; base_url?: string | null }) => api.post<Credential>("/v1/credentials", b),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.credentials }),
+  });
+}
+
+export function useUpdateCredentialEndpoint() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { id: string; base_url: string | null }) =>
+      api.patch<Credential>(`/v1/credentials/${b.id}`, { base_url: b.base_url }),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.credentials }),
   });
 }

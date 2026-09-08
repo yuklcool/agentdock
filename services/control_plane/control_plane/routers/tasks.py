@@ -574,6 +574,8 @@ async def resolve_task_credential(
     if chosen == "api_key":
         api_row = next(r for r in cred_rows if r["auth_method"] == "api_key")
         credential = decrypt_row(api_row, load_key_from_env())
+        if config.driver == "nanobot" and api_row.get("base_url"):
+            credential_meta["base_url"] = api_row["base_url"]
         credential_kind = "api_key"
         credential_used = "api_key"
     elif chosen is None and not keyless_ok:

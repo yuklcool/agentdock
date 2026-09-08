@@ -52,6 +52,7 @@ def runtime_config(
     token: str,
     servers: list[ShimMcpServer],
     env: dict[str, str],
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     model = config.model
     provider = (
@@ -62,7 +63,8 @@ def runtime_config(
     if provider not in {"openai", "anthropic"}:
         raise NanobotError("nanobot_unsupported_provider")
     provider_config: dict[str, Any] = {"apiKey": credential}
-    if base := env.get("AGENTDOCK_NANOBOT_API_BASE"):
+    # Keep an explicit instance override compatible with existing deployments.
+    if base := env.get("AGENTDOCK_NANOBOT_API_BASE") or base_url:
         provider_config["apiBase"] = base
     if provider == "openai":
         provider_config["apiType"] = "chat_completions"
@@ -385,6 +387,7 @@ class NanobotDriver:
                     runtime.token,
                     mcp_servers or [],
                     env or {},
+                    base_url=(credential_meta or {}).get("base_url"),
                 )
                 await runtime.ensure_started(native, skills or [], env or {})
                 async with runtime.connection() as ws:

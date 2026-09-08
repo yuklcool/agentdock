@@ -195,8 +195,8 @@ async def test_real_gateway_streaming_history_and_restart(monkeypatch):
                 body="Remember only this workspace: " + marker,
             )
         ],
+        credential_meta={"base_url": f"http://127.0.0.1:{port}/v1"},
         env={
-            "AGENTDOCK_NANOBOT_API_BASE": f"http://127.0.0.1:{port}/v1",
             "NO_PROXY": "127.0.0.1,localhost",
         },
     )

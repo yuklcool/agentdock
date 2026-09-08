@@ -335,6 +335,7 @@ CONTRACTS: list[tuple[str, str, str, str]] = [
     # ------------------------------------------------------------------
     ("GET",    "/v1/credentials",        "/v1/credentials",        "auth"),
     ("POST",   "/v1/credentials",        "/v1/credentials",        "auth"),
+    ("PATCH",  "/v1/credentials/{cid}",  "/v1/credentials/cred_x", "auth"),
     ("DELETE", "/v1/credentials/{cid}",  "/v1/credentials/cred_x", "auth"),
     ("GET",    "/v1/credentials/_internal/decrypt/{cid}",
      "/v1/credentials/_internal/decrypt/cred_x", "auth"),

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useCredentials, useSetCredential, useStartOpenAIOAuth, fetchOAuthConnection, keys, useStartAnthropicOAuth, useCompleteAnthropicOAuth, useCredentialProviders } from "../../api/queries";
+import { useCredentials, useSetCredential, useUpdateCredentialEndpoint, useStartOpenAIOAuth, fetchOAuthConnection, keys, useStartAnthropicOAuth, useCompleteAnthropicOAuth, useCredentialProviders } from "../../api/queries";
 import { api, ApiError } from "../../api/client";
 import { useToast } from "../../components/Toast";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -18,13 +18,32 @@ import type { Credential } from "../../api/types";
 export default function Credentials() {
   const { data } = useCredentials();
   const setCred = useSetCredential();
+  const updateEndpoint = useUpdateCredentialEndpoint();
   const qc = useQueryClient();
   const toast = useToast();
   const [provider, setProvider] = useState("anthropic");
   const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [editing, setEditing] = useState<Credential | null>(null);
   const [removing, setRemoving] = useState<Credential | null>(null);
   const [addingKey, setAddingKey] = useState(false);
   const creds = data?.credentials ?? [];
+  const supportsBaseUrl = ["openai", "anthropic"].includes(provider);
+
+  function selectProvider(value: string) {
+    setProvider(value);
+    setBaseUrl(creds.find((c) => c.provider === value && c.auth_method !== "oauth_subscription")?.base_url ?? "");
+  }
+
+  function editEndpoint(c: Credential) {
+    setEditing(c);
+    setProvider(c.provider);
+    setBaseUrl(c.base_url ?? "");
+    setApiKey("");
+    setAddingKey(true);
+    closeChatGPT();
+    closeClaude();
+  }
 
   // Provider dropdown is driven by the model catalog (api-key providers), not a
   // hardcoded list. Falls back to Anthropic until the request resolves.
@@ -136,8 +155,14 @@ export default function Credentials() {
 
   async function onSave() {
     try {
-      await setCred.mutateAsync({ provider, api_key: apiKey });
+      if (editing) {
+        await updateEndpoint.mutateAsync({ id: editing.id, base_url: baseUrl.trim() || null });
+      } else {
+        await setCred.mutateAsync({ provider, api_key: apiKey, base_url: supportsBaseUrl ? baseUrl.trim() || null : null });
+      }
       setApiKey("");
+      setBaseUrl("");
+      setEditing(null);
       setAddingKey(false);
       toast.success("Credential saved");
     } catch (err) {
@@ -168,7 +193,7 @@ export default function Credentials() {
             </span>
           </div>
           <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>
-            The provider keys tasks run with. Stored encrypted and never returned. We only show provider &amp; last-4.
+            Manage provider keys and Nanobot API endpoints. Keys are stored encrypted and never returned.
           </div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
@@ -176,7 +201,7 @@ export default function Credentials() {
             variant="secondary"
             size="sm"
             style={{ gap: 6, padding: "6px 12px 6px 10px" }}
-            onClick={() => { setApiKey(""); setAddingKey(true); closeChatGPT(); closeClaude(); }}
+            onClick={() => { setEditing(null); setApiKey(""); selectProvider(provider); setAddingKey(true); closeChatGPT(); closeClaude(); }}
           >
             <Icons.Key w={14} />
             Add API key
@@ -209,14 +234,14 @@ export default function Credentials() {
             <span className="cred-hero-badge">
               <Icons.Key style={{ width: 22, height: 22 }} />
             </span>
-            <div className="cred-hero-title">Add an API key</div>
+            <div className="cred-hero-title">{editing ? "Edit Base URL" : "Add an API key"}</div>
             <p className="cred-hero-lede">
-              Connect a provider key so tasks can call the model directly.
+              {editing ? `Update the Nanobot endpoint for ${editing.provider}. Your saved API key is kept.` : "Connect a provider key so tasks can call the model directly."}
             </p>
             <ul className="cred-hero-points">
               <li><Icons.Check style={{ width: 14, height: 14 }} /> Encrypted at rest, never returned</li>
-              <li><Icons.Check style={{ width: 14, height: 14 }} /> Only provider &amp; last-4 are shown</li>
-              <li><Icons.Check style={{ width: 14, height: 14 }} /> Replaces the current key for the provider</li>
+              <li><Icons.Check style={{ width: 14, height: 14 }} /> Secrets are never shown in full</li>
+              <li><Icons.Check style={{ width: 14, height: 14 }} /> {editing ? "Applies to the next Nanobot task" : "Replaces the current key for the provider"}</li>
             </ul>
           </aside>
 
@@ -231,15 +256,15 @@ export default function Credentials() {
             </button>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 420 }}>
-              <Field label="Provider" htmlFor="prov">
+              {!editing && <Field label="Provider" htmlFor="prov">
                 <Dropdown
                   id="prov"
                   value={provider}
-                  onChange={setProvider}
+                  onChange={selectProvider}
                   options={providerOptions}
                 />
-              </Field>
-              <Field label="API key" htmlFor="ak" hint="Paste the secret key from your provider dashboard.">
+              </Field>}
+              {!editing && <Field label="API key" htmlFor="ak" hint="Paste the secret key from your provider dashboard.">
                 <Input
                   id="ak"
                   type="password"
@@ -247,9 +272,22 @@ export default function Credentials() {
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                 />
-              </Field>
+              </Field>}
+              {supportsBaseUrl && <Field
+                label="Base URL (optional)"
+                htmlFor="base-url"
+                hint="For Nanobot tasks using this provider in this workspace. Leave blank for the default endpoint. An instance API address override takes priority."
+              >
+                <Input
+                  id="base-url"
+                  type="url"
+                  placeholder={provider === "anthropic" ? "https://api.anthropic.com" : "https://api.example.com/v1"}
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                />
+              </Field>}
               <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                <Button variant="primary" disabled={!apiKey || setCred.isPending} onClick={onSave}>
+                <Button variant="primary" disabled={(!editing && !apiKey) || setCred.isPending || updateEndpoint.isPending} onClick={onSave}>
                   <Icons.Check w={15} /> Save credential
                 </Button>
                 <Button variant="ghost" onClick={() => setAddingKey(false)}>
@@ -414,9 +452,10 @@ export default function Credentials() {
               <th>Provider</th>
               <th>Method</th>
               <th>Identifier</th>
+              <th>Nanobot Base URL</th>
               <th>Status</th>
               <th>Added by</th>
-              <th style={{ width: 110, textAlign: "right" }} />
+              <th style={{ width: 200, textAlign: "right" }} />
             </tr>
           </thead>
           <tbody>
@@ -431,6 +470,11 @@ export default function Credentials() {
                   <td>
                     <span className="chip" style={{ fontSize: 11.5, padding: "4px 8px" }}>
                       {isSub ? `acct …${c.account_tail ?? ""}` : `…${c.last4 ?? ""}`}
+                    </span>
+                  </td>
+                  <td>
+                    <span style={{ display: "block", maxWidth: 260, overflowWrap: "anywhere", fontSize: 12.5 }}>
+                      {isSub || !["openai", "anthropic"].includes(c.provider) ? "—" : c.base_url || "Provider default"}
                     </span>
                   </td>
                   <td>
@@ -454,6 +498,11 @@ export default function Credentials() {
                     </div>
                   </td>
                   <td style={{ textAlign: "right" }}>
+                    {!isSub && ["openai", "anthropic"].includes(c.provider) && (
+                      <Button variant="ghost" size="sm" onClick={() => editEndpoint(c)}>
+                        Edit Base URL
+                      </Button>
+                    )}
                     <Button variant="danger" size="sm" onClick={() => setRemoving(c)}>
                       Remove
                     </Button>
@@ -463,7 +512,7 @@ export default function Credentials() {
             })}
             {creds.length === 0 && (
               <EmptyRow
-                colSpan={6}
+                colSpan={7}
                 icon="Credentials"
                 title="No credentials yet"
                 description="Tasks will fail until you add an API key or connect a ChatGPT subscription."

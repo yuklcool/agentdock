@@ -9,7 +9,7 @@ from typing import Annotated
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Path, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl, TypeAdapter, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import control_plane.tables as t
@@ -44,7 +44,33 @@ async def _session(request: Request) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-class SetCredential(BaseModel):
+class CredentialEndpoint(BaseModel):
+    base_url: str | None = Field(
+        default=None, max_length=2048,
+        description="Optional HTTP(S) API base URL for Nanobot. Null uses the provider default.",
+    )
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def validate_base_url(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("Base URL must be an HTTP(S) URL")
+        value = value.strip()
+        if not value:
+            return None
+        if any(c.isspace() or ord(c) < 32 for c in value) or "\\" in value:
+            raise ValueError("Base URL cannot contain whitespace or backslashes")
+        url = TypeAdapter(HttpUrl).validate_python(value)
+        if url.username is not None or url.password is not None:
+            raise ValueError("Keep credentials in the API key field, not the Base URL")
+        if url.query is not None or url.fragment is not None:
+            raise ValueError("Base URL cannot contain query parameters or a fragment")
+        return str(url).rstrip("/")
+
+
+class SetCredential(CredentialEndpoint):
     provider: Annotated[
         str,
         Field(
@@ -96,6 +122,7 @@ class CredentialView(BaseModel):
     """Non-secret view of a stored credential (never includes keys/tokens)."""
 
     id: Annotated[str, Field(description="Credential id.")]
+    base_url: str | None = None
     provider: Annotated[
         str, Field(description="Provider the credential is for (e.g. `anthropic`, `openai`).")
     ]
@@ -140,6 +167,7 @@ class SetCredentialResult(BaseModel):
     """Result of storing an API-key credential (no secret returned)."""
 
     id: Annotated[str, Field(description="Id of the stored credential.")]
+    base_url: str | None = None
     provider: Annotated[str, Field(description="Provider the credential is for.")]
     last4: Annotated[str, Field(description="Last 4 characters of the stored API key.")]
     created_by: Annotated[
@@ -253,6 +281,7 @@ async def list_credentials(
                 t.credentials.c.id,
                 t.credentials.c.provider,
                 t.credentials.c.key_last4,
+                t.credentials.c.base_url,
                 t.credentials.c.auth_method,
                 t.credentials.c.status,
                 t.credentials.c.oauth_metadata,
@@ -276,6 +305,7 @@ async def list_credentials(
                 "auth_method": r["auth_method"],
                 "status": r["status"],
                 "last4": r["key_last4"],
+                "base_url": r.get("base_url"),
                 "account_tail": _account_tail(r["oauth_metadata"]),
                 "expires_at": (
                     r["token_expires_at"].isoformat() if r["token_expires_at"] else None
@@ -313,6 +343,8 @@ async def set_credential(
     """
     if body.provider not in _KNOWN_PROVIDERS:
         raise api_error(400, "validation_error", "Unknown provider", "provider")
+    if body.base_url and body.provider not in {"openai", "anthropic"}:
+        raise api_error(400, "validation_error", "Base URL is supported for OpenAI and Anthropic")
     if p.tenant_id is None:
         raise api_error(400, "validation_error", "A credential belongs to a tenant")
     master = load_key_from_env()
@@ -322,6 +354,7 @@ async def set_credential(
         api_key=body.api_key,
         created_by=p.user_id,
         master_key=master,
+        base_url=body.base_url,
     )
     # One credential per (tenant, provider, auth_method): replace any existing api_key.
     await conn.execute(
@@ -349,7 +382,50 @@ async def set_credential(
         "id": row["id"],
         "provider": row["provider"],
         "last4": row["key_last4"],
+        "base_url": row["base_url"],
         "created_by": row["created_by"],
+        "created_at": row["created_at"],
+    }
+
+
+class UpdateCredentialEndpoint(CredentialEndpoint):
+    base_url: str | None = Field(..., max_length=2048)
+
+
+@router.patch("/{cid}", response_model=SetCredentialResult)
+async def update_credential_endpoint(
+    cid: str,
+    body: UpdateCredentialEndpoint,
+    p: Principal = Depends(require_session_admin),
+    conn: AsyncSession = Depends(_session),
+) -> dict:  # type: ignore[type-arg]
+    """Change/clear the tenant's Nanobot endpoint without reading or replacing its key."""
+    row = (
+        await conn.execute(
+            sa.select(t.credentials).where(
+                t.credentials.c.id == cid,
+                t.credentials.c.tenant_id == p.tenant_id,
+            )
+        )
+    ).mappings().first()
+    if not row:
+        raise api_error(404, "not_found", "Credential not found")
+    if row["auth_method"] != "api_key" or row["provider"] not in {"openai", "anthropic"}:
+        raise api_error(400, "validation_error", "Base URL requires an OpenAI or Anthropic API key")
+    await conn.execute(
+        sa.update(t.credentials).where(
+            t.credentials.c.id == cid, t.credentials.c.tenant_id == p.tenant_id,
+        ).values(base_url=body.base_url, updated_at=datetime.now(UTC))
+    )
+    await audit(
+        conn, actor_type=actor_type_for(p), actor_id=p.user_id,
+        action="credential.endpoint_update", target_type="credential", target_id=cid,
+        details={"custom_endpoint": body.base_url is not None},
+    )
+    await conn.commit()
+    return {
+        "id": row["id"], "provider": row["provider"], "last4": row["key_last4"],
+        "base_url": body.base_url, "created_by": row["created_by"],
         "created_at": row["created_at"],
     }
 
