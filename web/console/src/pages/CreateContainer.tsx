@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useTemplates, useCreateContainer } from "../api/queries";
+import { useTemplates, useCreateContainer, useUsers } from "../api/queries";
+import { useAuth } from "../auth/useAuth";
+import { isAdmin } from "../lib/roles";
 import { useToast } from "../components/Toast";
 import { ApiError } from "../api/client";
 import { Button, SegControl, Field, Input, Note, Dropdown } from "../ui";
@@ -79,6 +81,11 @@ function ReviewRow({ label, value, mono }: { label: string; value: string | null
 }
 
 export default function CreateContainer() {
+  const { user } = useAuth();
+  const admin = isAdmin(user);
+  const ownersQuery = useUsers(admin, true);
+  const [ownerId, setOwnerId] = useState("");
+  const owners = ownersQuery.data?.users ?? [];
   const navigate = useNavigate();
   const toast = useToast();
   const { data } = useTemplates();
@@ -161,6 +168,7 @@ export default function CreateContainer() {
           : undefined;
       const ctr = await create.mutateAsync({
         name, template_id: effectiveTemplateId, image_variant: variant, config,
+        ...(admin && ownerId && { owner_user_id: ownerId, visibility: "private" as const }),
         ...(resource_limits && { resource_limits }),
         ...(envTouched && { env_vars: envVars }),
       });
@@ -259,6 +267,20 @@ export default function CreateContainer() {
               </div>
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
+                {admin && <div className="fluid-w" style={{ flex: "1 1 320px", maxWidth: 480 }}>
+                  <Field label="Owner user" htmlFor="owner-user"
+                    hint="Create a private instance for an active member of this workspace. Their personal instance quota applies.">
+                    <Dropdown id="owner-user" value={ownerId} onChange={setOwnerId} searchable
+                      disabled={ownersQuery.isLoading || ownersQuery.isError}
+                      options={[
+                        { value: "", label: "Myself (default)" },
+                        ...owners.map((u) => ({ value: u.id, label: `${u.name} <${u.email}>` })),
+                      ]} />
+                  </Field>
+                  {ownersQuery.isError && <Note>Could not load workspace users. Retry or create for yourself.
+                    <Button variant="ghost" size="sm" onClick={() => ownersQuery.refetch()}>Retry</Button>
+                  </Note>}
+                </div>}
                 <div className="fluid-w" style={{ flex: "1 1 160px", maxWidth: 220 }}>
                   <Field label="Memory (optional)" htmlFor="mem-limit" hint="Defaults by image variant.">
                     <Dropdown
@@ -326,6 +348,9 @@ export default function CreateContainer() {
             <div className="nc-rev-body">
               <ReviewRow label="Template" value={chosen?.name ?? null} />
               <ReviewRow label="Name" value={name.trim() || null} mono />
+              {admin && <ReviewRow label="Owner user" value={ownerId
+                ? owners.find((u) => u.id === ownerId)?.email ?? ownerId
+                : "Myself (default)"} />}
               <ReviewRow label="Model" value={model || null} mono />
               <ReviewRow label="Driver" value={chosen?.driver ?? null} mono />
               <ReviewRow label="Image" value={`${variant === "full" ? "Full" : "Slim"}${chosen?.image_variant === variant ? " (template)" : ""}`} />

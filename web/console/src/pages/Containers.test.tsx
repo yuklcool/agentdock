@@ -19,6 +19,9 @@ function ctr(over: Partial<any> = {}) {
     metadata: {}, last_task_at: null, created_at: "t", error_message: null, ...over };
 }
 function meAdmin() {
+  server.use(http.get("/v1/users", () => HttpResponse.json({ users: [
+    { id: "alice", name: "Alice", email: "alice@example.com", role: "member", status: "active" },
+  ] })));
   server.use(http.get("/v1/auth/me", () => HttpResponse.json({ id: "u", tenant_id: "t", name: "Davis", email: "d@x.io", role: "admin", is_staff: false, must_change_password: false,
     tenant: { id: "t", name: "A", limits: { allowed_drivers: ["vanilla"], default_max_iterations: 30, default_max_tokens: 200000, default_task_timeout_seconds: 1800, max_concurrent_tasks_per_container: 4 } } })));
 }
@@ -150,4 +153,17 @@ describe("Containers", () => {
     await userEvent.click(within(row).getByRole("button", { name: /Pin container/i }));
     expect(screen.getByTestId("loc").textContent).toBe("/");
   });
+});
+
+
+it("shows private owners and shared instances to admins", async () => {
+  meAdmin();
+  server.use(http.get("/v1/containers", () => HttpResponse.json({ containers: [
+    ctr({ owner_user_id: "alice" }), ctr({ id: "con_shared", owner_user_id: null }),
+    ctr({ id: "con_old", owner_user_id: "disabled-user-id" }),
+  ] })));
+  renderWithProviders(<AuthProvider><Containers /></AuthProvider>);
+  expect(await screen.findByText("Alice <alice@example.com>")).toBeInTheDocument();
+  expect(screen.getByText("Shared")).toBeInTheDocument();
+  expect(screen.getByText("disabled-user-id")).toBeInTheDocument();
 });

@@ -53,6 +53,10 @@ class EnvVarOut(BaseModel):
 
 
 class CreateContainerRequest(BaseModel):
+    owner_user_id: str | None = Field(
+        None, min_length=1, pattern=r"^\S+$",
+        description="Admin-only owner of a private container; must be an active workspace member.",
+    )
     visibility: Literal["private", "shared"] | None = Field(
         None, description="Defaults to private for a user, shared for a workspace API key."
     )

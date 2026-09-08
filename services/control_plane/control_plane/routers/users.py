@@ -166,6 +166,7 @@ class DeleteUserResponse(BaseModel):
 async def list_users(
     p: Principal = Depends(require_session_admin),
     conn: AsyncSession = Depends(_session),
+    eligible_owner: bool = False,
 ) -> dict:  # type: ignore[type-arg]
     """List the active members of the current workspace.
 
@@ -190,6 +191,8 @@ async def list_users(
             t.memberships.c.status == "active",
         )
     )
+    if eligible_owner:
+        q = q.where(t.users.c.status == "active", t.users.c.is_staff.is_(False))
     rows = (await conn.execute(q)).mappings().all()
     return {"users": [dict(r) for r in rows]}
 

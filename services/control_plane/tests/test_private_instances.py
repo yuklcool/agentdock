@@ -365,3 +365,139 @@ async def test_running_capacity_lock_serializes_restore_with_create(database, mo
         "accepted",
         "running_capacity_exhausted",
     ]
+
+
+@pytest.fixture
+def owner_creation(monkeypatch):
+    import control_plane.routers.containers as routes
+    from control_plane.config import Settings
+
+    calls = []
+
+    async def provision(**kwargs):
+        calls.append(kwargs['container_id'])
+        await asyncio.sleep(0.02)
+        return SimpleNamespace(host_shim_url=None)
+
+    monkeypatch.setattr(routes, 'provision_container', provision)
+    request = SimpleNamespace(
+        state=SimpleNamespace(),
+        app=SimpleNamespace(state=SimpleNamespace(settings=Settings.from_env())),
+    )
+    return routes, request, calls
+
+
+@pytest.mark.integration
+async def test_admin_creation_uses_target_quota_and_existing_access(database, owner_creation):
+    from agentcore.models import AgentConfig
+    from control_plane.models_db import audit_log
+    from control_plane.schemas import CreateContainerRequest
+
+    factory, tid, alice, bob, cids = database
+    routes, request, calls = owner_creation
+    admin = Principal(tenant_id=tid, user_id=bob, role='admin', is_staff=False)
+    async with factory() as db:
+        # Admin already owns two. Alice has one and can receive just one more.
+        await db.execute(containers.update().where(containers.c.id == cids[2])
+                         .values(owner_user_id=bob))
+        await db.execute(t.tenants.update().where(t.tenants.c.id == tid)
+                         .values(limits={'max_private_containers_per_user': 2}))
+        await db.commit()
+
+    async def create():
+        async with factory() as db:
+            bind_principal(db, admin)
+            try:
+                return await routes.create_container(request, CreateContainerRequest(
+                    name='delegated', visibility='private', owner_user_id=alice,
+                    config=AgentConfig(driver='nanobot', model='gpt-4o'),
+                ), admin, db)
+            except APIError as exc:
+                await db.rollback()
+                return exc.code
+
+    results = await asyncio.gather(create(), create())
+    assert results.count('private_instance_limit') == 1
+    result = next(r for r in results if isinstance(r, dict))
+    assert result['owner_user_id'] == alice and len(calls) == 1
+    async with factory() as db:
+        event = (await db.execute(sa.select(audit_log).where(
+            audit_log.c.target_id == result['id'], audit_log.c.action == 'container.create',
+        ))).mappings().one()
+        assert event['actor_id'] == bob and event['details']['owner_user_id'] == alice
+        for uid, role, allowed in [(alice, 'member', True), (bob, 'member', False),
+                                   (bob, 'admin', True)]:
+            p = Principal(tenant_id=tid, user_id=uid, role=role, is_staff=False)
+            bind_principal(db, p)
+            listing = await routes.list_containers(request, p, db, external_id=None, status=None)
+            assert (result['id'] in {c['id'] for c in listing['containers']}) == allowed
+            if allowed:
+                detail = await routes.get_container(result['id'], request, p, db)
+                assert detail['id'] == result['id']
+            else:
+                with pytest.raises(APIError) as exc:
+                    await routes.get_container(result['id'], request, p, db)
+                assert exc.value.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('invalid', ['missing', 'other_workspace', 'disabled_user',
+                                   'disabled_membership', 'staff'])
+async def test_admin_rejects_invalid_owner_before_provision(database, owner_creation, invalid):
+    from agentcore.models import AgentConfig
+    from control_plane.routers.users import list_users
+    from control_plane.schemas import CreateContainerRequest
+
+    factory, tid, alice, bob, _ = database
+    routes, request, calls = owner_creation
+    admin = Principal(tenant_id=tid, user_id=bob, role='admin', is_staff=False)
+    async with factory() as db:
+        if invalid == 'other_workspace':
+            await db.execute(t.memberships.delete().where(t.memberships.c.user_id == alice))
+        elif invalid == 'disabled_user':
+            await db.execute(t.users.update().where(t.users.c.id == alice)
+                             .values(status='disabled'))
+        elif invalid == 'disabled_membership':
+            await db.execute(t.memberships.update().where(t.memberships.c.user_id == alice)
+                             .values(status='disabled'))
+        elif invalid == 'staff':
+            await db.execute(t.users.update().where(t.users.c.id == alice).values(is_staff=True))
+        selected = 'missing-user' if invalid == 'missing' else alice
+        candidates = await list_users(admin, db, eligible_owner=True)
+        assert selected not in {u['id'] for u in candidates['users']}
+        with pytest.raises(APIError) as exc:
+            await routes.create_container(request, CreateContainerRequest(
+                name='invalid-owner', owner_user_id=selected,
+                config=AgentConfig(driver='nanobot', model='gpt-4o'),
+            ), admin, db)
+        assert exc.value.code == 'validation_error'
+        assert not calls
+
+
+@pytest.mark.integration
+async def test_member_cannot_select_owner_and_default_is_unchanged(database, owner_creation):
+    from agentcore.models import AgentConfig
+    from control_plane.schemas import CreateContainerRequest
+
+    factory, tid, alice, bob, _ = database
+    routes, request, calls = owner_creation
+    member = Principal(tenant_id=tid, user_id=alice, role='member', is_staff=False)
+    config = AgentConfig(driver='nanobot', model='gpt-4o')
+    async with factory() as db:
+        for target in (alice, bob):
+            with pytest.raises(APIError) as exc:
+                await routes.create_container(request, CreateContainerRequest(
+                    name='forged', owner_user_id=target, config=config,
+                ), member, db)
+            assert exc.value.status_code == 403
+        assert not calls
+        created = await routes.create_container(request, CreateContainerRequest(
+            name='self-created', config=config,
+        ), member, db)
+        assert created['owner_user_id'] == alice
+        admin = Principal(tenant_id=tid, user_id=bob, role='owner', is_staff=False)
+        with pytest.raises(APIError) as exc:
+            await routes.create_container(request, CreateContainerRequest(
+                name='shared-with-owner', visibility='shared', owner_user_id=alice, config=config,
+            ), admin, db)
+        assert exc.value.code == 'validation_error'

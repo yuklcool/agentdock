@@ -134,7 +134,11 @@ export function useDeleteFile(cid: string) {
 }
 export const useApiKeys = (personal = false) => useQuery({ queryKey: personal ? [...keys.apiKeys, "personal"] : keys.apiKeys, queryFn: () => api.get<{ keys: ApiKeyRow[] }>(personal ? "/v1/me/api-keys" : "/v1/api-keys") });
 export const useCredentials = () => useQuery({ queryKey: keys.credentials, queryFn: () => api.get<{ credentials: Credential[] }>("/v1/credentials") });
-export const useUsers = () => useQuery({ queryKey: keys.users, queryFn: () => api.get<{ users: User[] }>("/v1/users") });
+export const useUsers = (enabled = true, eligibleOwner = false) => useQuery({
+  queryKey: eligibleOwner ? [...keys.users, "eligible-owner"] : keys.users,
+  queryFn: () => api.get<{ users: User[] }>(eligibleOwner ? "/v1/users?eligible_owner=true" : "/v1/users"),
+  enabled,
+});
 export const useStaffUsers = () => useQuery({ queryKey: keys.staffUsers, queryFn: () => api.get<{ staff: StaffUser[] }>("/admin/v1/staff") });
 
 export const useAnalyticsUsage = (range: Range) =>
@@ -291,6 +295,7 @@ export function useCreateContainer() {
     mutationFn: (body: {
       name: string; template_id: string; image_variant: "full" | "slim";
       external_id?: string; config?: AgentConfig;
+      owner_user_id?: string; visibility?: "private" | "shared";
       resource_limits?: { mem_limit?: string; cpus?: number };
       env_vars?: EnvVar[];
     }) => api.post<Container>("/v1/containers", body),
