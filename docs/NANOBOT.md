@@ -43,7 +43,7 @@ Python/系统软件包仓库，以及原有执行引擎的下载源；不再从 
 新建或恢复实例时直接使用已构建镜像，不需要重新安装依赖。
 
 1. 打开 `http://localhost:5173`，使用启动命令输出的管理员账号登录并修改密码。
-2. 进入工作空间，在 **Settings → Credentials** 添加 OpenAI 或 Anthropic API key。
+2. 进入工作空间，在 **Settings → Credentials** 添加 OpenAI 或 Anthropic API key，可选填 **Base URL**。已有凭据可点击 **Edit Base URL** 单独修改地址，无需重新输入密钥。
 3. 新建 Agent，选择 **Nanobot** 驱动及可用模型，设置实例名称。资源上限由管理员管理。
 4. 如需使用额外能力，在实例配置中选择 MCP 和 Skills。
 5. 在该实例的对话页面发送任务；第一次任务会启动容器内的 Nanobot Gateway。
@@ -186,8 +186,14 @@ Skills 使用平台已经解析的文本或 Git bundle。更新时只替换本�
 平台分配不会禁用 Nanobot 的所有内置技能，Skill 列表不构成数据访问权限边界。
 
 当前模型选择支持目录中的 OpenAI 和 Anthropic API key 模型；不支持订阅 OAuth、Codex 专用模型或
-平台未登记的任意模型名称。可在实例环境变量中设置 `AGENTDOCK_NANOBOT_API_BASE`，将兼容模型请求
-发到指定 API 地址。模型名称仍须与平台模型目录和该 API 实际提供的模型一致。
+平台未登记的任意模型名称。在 **Settings → Credentials** 设置可选的 **Base URL**，
+即可让本工作空间使用该提供商凭据的 Nanobot 实例请求兼容 API，例如 `https://api.example.com/v1`。
+填写 API 根地址，不要填写完整 `/chat/completions` 路径；OpenAI 兼容服务通常需要保留 `/v1`。
+只接受 HTTP(S) 地址，密钥仍放在 API key 字段；地址不能含用户名、密码、查询参数或片段。
+已有凭据可单独修改或清空 Base URL，原密钥保持不变。更新在下一次任务开始时生效。
+该字段当前仅用于 Nanobot 的 OpenAI/Anthropic API key，不影响订阅 OAuth 和其他驱动。
+实例环境变量 `AGENTDOCK_NANOBOT_API_BASE` 优先于凭据地址；两者都未设置时使用提供商默认地址。
+模型名称仍须与平台模型目录和该 API 实际提供的模型一致；地址变更不会放宽容器出网策略。
 
 平台配置的说明文字和 Context 随每次任务作为上下文传递，不覆盖用户的 AGENTS.md；
 它不会替换 Nanobot 原生系统提示词。Nanobot 原生 Memory 和工具体系保持独立。

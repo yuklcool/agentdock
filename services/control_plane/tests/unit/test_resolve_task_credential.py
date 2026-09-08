@@ -140,3 +140,16 @@ async def test_anthropic_behavior_unchanged() -> None:
     )
     assert cred == "sk-ant-9999"
     assert used == "api_key"
+
+
+@pytest.mark.parametrize("driver", ["nanobot", "vanilla"])
+async def test_custom_endpoint_follows_selected_nanobot_credential(driver):
+    row = _key_row("openai", "test-key-1234")
+    row["base_url"] = "https://proxy.example/v1"
+    session = FakeSession({"openai": [row]})
+    cred, kind, meta, used = await resolve_task_credential(
+        session, settings=SETTINGS, tenant_id="ten_1",
+        config=AgentConfig(driver=driver, model="gpt-4o"), timeout_seconds=600,
+    )
+    assert (cred, kind, used) == ("test-key-1234", "api_key", "api_key")
+    assert meta == ({"base_url": row["base_url"]} if driver == "nanobot" else {})

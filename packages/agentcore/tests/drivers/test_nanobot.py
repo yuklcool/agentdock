@@ -144,6 +144,31 @@ async def test_streams_wait_for_turn_end_and_ignore_other_chats(tmp_path):
     await run_peer(tmp_path, Peer(), check)
 
 
+@pytest.mark.parametrize("model, provider", [
+    ("gpt-4o", "openai"), ("claude-sonnet-4", "anthropic"),
+])
+async def test_credential_endpoint_reaches_gateway_and_can_be_cleared(tmp_path, model, provider):
+    async def check(driver, runtime):
+        config = AgentConfig(driver="nanobot", model=model)
+        for base_url in ["https://proxy.example/v1", "https://second.example/v1", None]:
+            result, _ = await invoke(
+                driver, tmp_path, config=config, credential_meta={"base_url": base_url},
+            )
+            assert result.success
+            native = runtime.ensure_started.call_args.args[0]
+            assert native["providers"][provider].get("apiBase") == base_url
+        result, _ = await invoke(
+            driver, tmp_path, config=config,
+            credential_meta={"base_url": "https://credential.example/v1"},
+            env={"AGENTDOCK_NANOBOT_API_BASE": "https://instance.example/v1"},
+        )
+        assert result.success
+        native = runtime.ensure_started.call_args.args[0]
+        assert native["providers"][provider]["apiBase"] == "https://instance.example/v1"
+
+    await run_peer(tmp_path, Peer(), check)
+
+
 def test_ssrf_exceptions_are_host_owned(monkeypatch):
     monkeypatch.delenv("AGENTDOCK_NANOBOT_SSRF_WHITELIST", raising=False)
     env = {"AGENTDOCK_NANOBOT_SSRF_WHITELIST": "0.0.0.0/0"}

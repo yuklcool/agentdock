@@ -144,6 +144,7 @@ export interface ApiKeyCreated { id: string; name: string; key: string; prefix: 
 
 export interface Credential {
   id: string;
+  base_url?: string | null;
   provider: string;
   auth_method: "api_key" | "oauth_subscription";
   status: "active" | "reauth_required";

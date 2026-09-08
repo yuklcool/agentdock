@@ -55,6 +55,22 @@ def main():
     assert user["must_change_password"]
     assert json.loads(request("/v1/auth/me"))["is_staff"]
     request("/v1/auth/select-tenant", {"tenant_id": "ten_seed"})
+    # Exercise the migrated schema and endpoint edits against the real API/DB.
+    credential = json.loads(request("/v1/credentials", {
+        "provider": "openai", "api_key": "distribution-test-only-1234",
+        "base_url": "https://proxy.example/v1/",
+    }))
+    assert credential["base_url"] == "https://proxy.example/v1"
+    for endpoint in ["https://second.example/v1", None]:
+        updated = json.loads(request(
+            f"/v1/credentials/{credential['id']}", {"base_url": endpoint}, method="PATCH",
+        ))
+        assert updated["last4"] == "1234" and updated["base_url"] == endpoint
+        listing = json.loads(request("/v1/credentials"))
+        saved = next(c for c in listing["credentials"] if c["id"] == credential["id"])
+        assert saved["base_url"] == endpoint
+        assert "distribution-test-only" not in json.dumps(listing)
+    request(f"/v1/credentials/{credential['id']}", method="DELETE")
     container = json.loads(
         request(
             "/v1/containers",
