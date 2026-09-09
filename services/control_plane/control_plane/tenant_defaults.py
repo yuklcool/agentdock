@@ -7,7 +7,7 @@ _DEFAULTS: dict = {  # type: ignore[type-arg]
     "max_containers": 2000,
     "max_running_containers": 30,
     "max_users": 25,
-    "max_private_containers_per_user": 10,
+    "max_private_containers_per_user": 1,
     # Zero means unlimited. Configure budgets before enabling paid production access.
     "daily_token_budget": 0,
     "daily_task_limit": 0,
@@ -41,6 +41,8 @@ def merge_limits(overrides: dict | None) -> dict:  # type: ignore[type-arg]
     merged = default_limits()
     if overrides:
         merged.update(overrides)
+    # Binding cardinality is an invariant, not a configurable quota.
+    merged["max_private_containers_per_user"] = 1
     return merged
 
 

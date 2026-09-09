@@ -1,7 +1,7 @@
 """One ownership policy for HTTP, WebSocket, lists and aggregate queries.
 
 NULL ownership is explicitly shared within a tenant (including legacy rows).
-User sessions carry a user id; workspace keys cannot access private rows.
+User sessions retain owner ACLs; workspace keys have tenant-wide container access.
 Background services use unscoped sessions after validating their stored target.
 """
 
@@ -31,11 +31,21 @@ def is_manager(principal: Principal) -> bool:
     return principal.is_staff or principal.role in {"owner", "admin"}
 
 
+def is_workspace_key(principal: Principal) -> bool:
+    """A tenant service credential, without user or administrator privileges."""
+    return (
+        principal.auth_method == "api_key"
+        and principal.user_id is None
+        and principal.tenant_id is not None
+        and not principal.is_staff
+    )
+
+
 def visible_containers(principal: Principal | None) -> Any:
     if principal is None:
         return sa.true()  # internal service session; never used by request dependencies
     tenant = containers.c.tenant_id == principal.tenant_id
-    if is_manager(principal):
+    if is_manager(principal) or is_workspace_key(principal):
         return tenant
     ownership = containers.c.owner_user_id.is_(None)
     if principal.user_id is not None:
@@ -52,7 +62,10 @@ def assert_container_access(row: Any, principal: Principal | None) -> None:
         return
     owner = getattr(row, "owner_user_id", None)
     if row.tenant_id != principal.tenant_id or (
-        owner is not None and owner != principal.user_id and not is_manager(principal)
+        owner is not None
+        and owner != principal.user_id
+        and not is_manager(principal)
+        and not is_workspace_key(principal)
     ):
         raise not_found("container not found")
 

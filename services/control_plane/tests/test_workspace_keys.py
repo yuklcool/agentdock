@@ -17,7 +17,6 @@ from control_plane.access import assert_container_access
 from control_plane.app import create_app
 from control_plane.auth.principal import DbPrincipalRepo, Principal, resolve_from_inputs
 from control_plane.config import Settings
-from control_plane.errors import APIError
 from control_plane.models_db import containers, metadata, templates
 from control_plane.routers.api_keys import (
     CreateKey,
@@ -95,9 +94,7 @@ async def test_workspace_key_create_list_authenticate_and_revoke(database):
                 await db.execute(sa.select(containers).where(containers.c.id == cids[0]))
             ).first()
             assert_container_access(shared, p)
-            with pytest.raises(APIError) as denied:
-                assert_container_access(private, p)
-            assert denied.value.status_code == 404
+            assert_container_access(private, p)
             # The creator leaving does not redefine a workspace service identity.
             await db.execute(
                 t.memberships.update()

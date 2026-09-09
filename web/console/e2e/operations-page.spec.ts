@@ -10,7 +10,7 @@ for (const width of [1440, 390]) {
       const path = new URL(route.request().url()).pathname;
       let body: unknown = {};
       if (path === "/v1/auth/me") body = me;
-      else if (path === "/v1/operations/policy") body = { max_private_containers_per_user: 10, daily_task_limit: 0,
+      else if (path === "/v1/operations/policy") body = { max_private_containers_per_user: 1, daily_task_limit: 0,
         daily_token_budget: 0, user_daily_token_budget: 0, user_daily_task_limit: 0 };
       else if (path === "/v1/operations/audit") body = { events: [{ id: 1, ts: "2026-09-09T01:45:23Z",
         action: "container.create", action_label: "创建容器", actor_type: "admin", actor_id: "usr_admin",

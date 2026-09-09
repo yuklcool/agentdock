@@ -932,10 +932,14 @@ async def delete(
     gone / owned by another actor. The caller owns the transaction/commit.
     """
     async with container_lock(cid):
-        if await current_status(db, cid) is None:
+        status = await current_status(db, cid)
+        if status is None:
             return False  # already deleted
-        if not await transition_from_any(
-            db, cid, _NON_TERMINAL | {"destroying", "destroyed"}, "deleting"
+        # A destroyed tombstone has released its binding slot. Keep it terminal
+        # during purge so deleting it cannot collide with the user's new binding.
+        # Its Docker resources have already been reclaimed; a failure is retryable.
+        if status != "destroyed" and not await transition_from_any(
+            db, cid, _NON_TERMINAL | {"destroying"}, "deleting"
         ):
             return False
         try:

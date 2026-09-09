@@ -7,7 +7,7 @@ import { renderWithProviders } from "../../test/render";
 import { AuthContext } from "../../auth/useAuth";
 import type { Me } from "../../api/types";
 import Operations, { type AuditEvent } from "./Operations";
-const policy = { max_private_containers_per_user: 10, daily_token_budget: 0, daily_task_limit: 0, user_daily_token_budget: 0, user_daily_task_limit: 0 };
+const policy = { max_private_containers_per_user: 1, daily_token_budget: 0, daily_task_limit: 0, user_daily_token_budget: 0, user_daily_task_limit: 0 };
 const event: AuditEvent = {
   id: 1, ts: "2026-09-09T01:45:23Z", action: "container.create", action_label: "创建容器",
   actor_type: "admin", actor_id: "usr_alice", actor: { id: "usr_alice", name: "张三", account: "zhangsan", email: "alice@example.com" },
@@ -75,7 +75,8 @@ test("clearing daily limit saves zero; instance count stays required", async () 
     http.put("/v1/operations/policy", async ({ request }) => { saved = await request.json(); return HttpResponse.json(saved as typeof policy); }));
   renderWithProviders(<Operations />);
   await userEvent.clear(await screen.findByLabelText("工作空间每日任务数"));
-  expect(screen.getByLabelText("每人最多私有实例数")).toBeRequired();
+  expect(screen.getByLabelText("每人最多绑定容器数")).toBeDisabled();
+  expect(screen.getByLabelText("每人最多绑定容器数")).toHaveValue(1);
   await userEvent.click(screen.getByRole("button", { name: "保存更改" }));
   await waitFor(() => expect(saved).toEqual(policy));
 });

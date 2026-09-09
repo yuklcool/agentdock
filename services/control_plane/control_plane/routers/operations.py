@@ -22,7 +22,10 @@ router = APIRouter(tags=["Operations"])
 
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    max_private_containers_per_user: int = Field(default=10, ge=1, le=1000)
+    max_private_containers_per_user: int = Field(
+        default=1, ge=1, le=1,
+        description="Fixed: one bound container per user per workspace.",
+    )
     daily_token_budget: int = Field(default=0, ge=0, le=10**12)
     daily_task_limit: int = Field(default=0, ge=0, le=10**9)
     user_daily_token_budget: int = Field(default=0, ge=0, le=10**12)

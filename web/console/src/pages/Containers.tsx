@@ -219,7 +219,7 @@ export default function Containers() {
             <tr>
               <th>External id</th>
               <th>Status</th>
-              {admin && <th>Owner user</th>}
+              {admin && <th>绑定用户</th>}
               <th>Driver / model</th>
               <th>Variant</th>
               <th>Tasks</th>

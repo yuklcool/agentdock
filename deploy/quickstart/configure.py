@@ -19,7 +19,7 @@ def main():
     parser.add_argument("--url", default="http://localhost:8080", help="浏览器访问地址")
     parser.add_argument("--bind", default="127.0.0.1", help="监听 IP；远程访问使用 0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--version", default="0.3.4")
+    parser.add_argument("--version", default="0.3.5")
     parser.add_argument("--registry", default="ghcr.io/yuklcool/agentdock")
     parser.add_argument("--quiet", action="store_true", help="仅生成配置，不输出临时密码")
     args = parser.parse_args()

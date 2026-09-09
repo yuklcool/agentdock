@@ -55,10 +55,18 @@ class EnvVarOut(BaseModel):
 class CreateContainerRequest(BaseModel):
     owner_user_id: str | None = Field(
         None, min_length=1, pattern=r"^\S+$",
-        description="Admin-only owner of a private container; must be an active workspace member.",
+        description=(
+            "Optional admin-selected binding to an active workspace member. At most one "
+            "non-destroyed container per user and workspace (409 user_container_already_bound). "
+            "Null means unbound."
+        ),
     )
     visibility: Literal["private", "shared"] | None = Field(
-        None, description="Defaults to private for a user, shared for a workspace API key."
+        None, description=(
+            "Compatibility visibility selector. Defaults to shared for admins and workspace keys, "
+            "private for ordinary user sessions. A non-null owner implies private; "
+            "explicit null implies shared."
+        )
     )
     name: str = Field(
         description="Human-readable name for the agent container.", examples=["research-bot"]

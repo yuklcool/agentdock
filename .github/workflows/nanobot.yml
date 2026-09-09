@@ -104,7 +104,7 @@ jobs:
         working-directory: services/control_plane
         run: alembic upgrade head
       - name: User isolation, workflow targets and concurrent budget reservations
-        run: PYTHONPATH=services/control_plane:services/control_plane/tests pytest -q services/control_plane/tests/test_private_instances.py services/control_plane/tests/test_audit_view.py services/control_plane/tests/test_workspace_keys.py
+        run: PYTHONPATH=services/control_plane:services/control_plane/tests pytest -q services/control_plane/tests/test_private_instances.py services/control_plane/tests/test_audit_view.py services/control_plane/tests/test_workspace_keys.py services/control_plane/tests/test_user_container_binding.py
 
   backup-restore:
     runs-on: ubuntu-latest

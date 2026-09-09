@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Trigger driver + tool registration so DRIVERS/TOOLS are populated.
@@ -24,6 +25,7 @@ from control_plane.access import (
     assert_container_access,
     bind_principal,
     is_manager,
+    is_workspace_key,
     session_principal,
     visible_containers,
 )
@@ -344,7 +346,17 @@ async def create_container(
 
     if not is_manager(principal) and (body.volume_id or body.resources or body.image_tag):
         raise api_error(403, "forbidden", "Custom volumes, host resources and images require admin")
-    visibility = body.visibility or ("private" if principal.user_id else "shared")
+    # Explicit null means unbound; ordinary members still cannot create shared
+    # resources. Omitted owner keeps members self-bound, managers default unbound.
+    explicit_owner = "owner_user_id" in body.model_fields_set
+    default_visibility = (
+        "private" if body.owner_user_id is not None
+        or (not explicit_owner and principal.user_id and not is_manager(principal))
+        else "shared"
+    )
+    visibility = body.visibility or default_visibility
+    if explicit_owner and body.owner_user_id is None and visibility == "private":
+        raise validation_error("A null owner requires shared visibility", "owner_user_id")
     if visibility == "private" and principal.user_id is None:
         raise api_error(403, "forbidden", "Private instances require a user session")
     if visibility == "shared" and principal.user_id and not is_manager(principal):
@@ -418,6 +430,24 @@ async def create_container(
                 "Owner must be an active member of this workspace", "owner_user_id"
             )
         effective_owner_user_id = target
+    if visibility == "private":
+        owned = (
+            await session.execute(
+                sa.select(sa.func.count())
+                .select_from(containers)
+                .where(
+                    containers.c.tenant_id == tid,
+                    containers.c.owner_user_id == effective_owner_user_id,
+                    containers.c.status != "destroyed",
+                )
+            )
+        ).scalar_one()
+        if owned:
+            raise api_error(
+                409, "user_container_already_bound",
+                "This user already has a bound container in this workspace.",
+            )
+
     count = (
         await session.execute(
             sa.select(sa.func.count())
@@ -451,21 +481,6 @@ async def create_container(
         raise api_error(
             503, "running_capacity_exhausted", "Pause an idle instance before creating another"
         )
-    if visibility == "private":
-        owned = (
-            await session.execute(
-                sa.select(sa.func.count())
-                .select_from(containers)
-                .where(
-                    containers.c.tenant_id == tid,
-                    containers.c.owner_user_id == effective_owner_user_id,
-                    containers.c.status != "destroyed",
-                )
-            )
-        ).scalar_one()
-        cap = int(limits["max_private_containers_per_user"])
-        if owned >= cap:
-            raise api_error(409, "private_instance_limit", "Private instance limit reached")
 
     if body.external_id is not None:
         existing = (
@@ -492,29 +507,39 @@ async def create_container(
 
     token = secrets.token_urlsafe(32)
     resources: dict[str, Any] = dict(body.resources or {})
-    await session.execute(
-        containers.insert().values(
-            id=cid,
-            tenant_id=tid,
-            name=body.name,
-            owner_user_id=effective_owner_user_id,
-            external_id=body.external_id,
-            metadata=body.metadata,
-            docker_name=docker_name_for(cid),
-            volume_name=reuse_volume or volume_name_for(cid),
-            shim_token=token,
-            image_tag=image_tag,
-            image_variant=variant,
-            template_id=template_id,
-            config=config.model_dump(),
-            status="provisioning",
-            resources=resources,
-            mem_limit=mem_limit,
-            cpus=cpus,
-            env_vars=stored_env,
+    try:
+        await session.execute(
+            containers.insert().values(
+                id=cid,
+                tenant_id=tid,
+                name=body.name,
+                owner_user_id=effective_owner_user_id,
+                external_id=body.external_id,
+                metadata=body.metadata,
+                docker_name=docker_name_for(cid),
+                volume_name=reuse_volume or volume_name_for(cid),
+                shim_token=token,
+                image_tag=image_tag,
+                image_variant=variant,
+                template_id=template_id,
+                config=config.model_dump(),
+                status="provisioning",
+                resources=resources,
+                mem_limit=mem_limit,
+                cpus=cpus,
+                env_vars=stored_env,
+            )
         )
-    )
-    await session.commit()  # release capacity lock and connection before Docker
+        await session.commit()  # release capacity lock and connection before Docker
+    except IntegrityError as exc:
+        await session.rollback()
+        if "uq_container_owner_per_tenant" in str(exc.orig):
+            raise api_error(
+                409, "user_container_already_bound",
+                "This user already has a bound container in this workspace.",
+            ) from exc
+        raise
+
 
     try:
         result = await provision_container(
@@ -592,6 +617,14 @@ async def list_containers(
         str | None,
         Query(description="Filter by lifecycle status (e.g. running, paused, archived, error)."),
     ] = None,
+    owner_user_id: Annotated[
+        str | None,
+        Query(min_length=1, pattern=r"^\S+$", description=(
+            "Find the user's single non-destroyed bound container in this workspace. "
+            "Workspace API keys default to unbound containers when omitted. "
+            "User session permissions still apply."
+        )),
+    ] = None,
 ) -> dict:  # type: ignore[type-arg]
     """List the caller's containers, optionally filtered.
 
@@ -600,6 +633,13 @@ async def list_containers(
     results.
     """
     q = select(containers).where(visible_containers(principal))
+    if owner_user_id is not None:
+        q = q.where(
+            containers.c.owner_user_id == owner_user_id,
+            containers.c.status != "destroyed",
+        )
+    elif is_workspace_key(principal):
+        q = q.where(containers.c.owner_user_id.is_(None))
     if external_id is not None:
         q = q.where(containers.c.external_id == external_id)
     if status is not None:

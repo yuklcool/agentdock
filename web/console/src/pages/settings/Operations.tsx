@@ -16,7 +16,7 @@ import "./Operations.css";
 type Policy = Record<string, number>;
 const groups = [
   { title: "实例限制", description: "限制每位用户持有的私有实例数量。", fields: [
-    ["max_private_containers_per_user", "每人最多私有实例数"],
+    ["max_private_containers_per_user", "每人最多绑定容器数"],
   ] },
   { title: "工作空间每日限额", description: "整个工作空间共用的每日预算。", fields: [
     ["daily_task_limit", "工作空间每日任务数"], ["daily_token_budget", "工作空间每日 Token 预算"],
@@ -140,9 +140,9 @@ function OperationsPage({ tenantId }: { tenantId: string }) {
             const instance = key === "max_private_containers_per_user";
             const value = draft[key] ?? (policy.data![key] === 0 ? "" : String(policy.data![key]));
             return <Field key={key} label={label} htmlFor={key}
-              hint={instance ? "1–1000 个；暂停和归档的实例也计入。" : Number(value) === 0 ? "不限额（保存值为 0）" : "填 0 或留空表示不限额。"}>
-              <Input id={key} type="number" required={instance} min={instance ? 1 : 0} disabled={saving}
-                max={instance ? 1000 : key.endsWith("task_limit") ? 1e9 : 1e12}
+              hint={instance ? "固定为 1 个；暂停和归档仍占用绑定名额。" : Number(value) === 0 ? "不限额（保存值为 0）" : "填 0 或留空表示不限额。"}>
+              <Input id={key} type="number" required={instance} min={instance ? 1 : 0} disabled={saving || instance}
+                max={instance ? 1 : key.endsWith("task_limit") ? 1e9 : 1e12}
                 placeholder={instance ? undefined : "不限额"} step={1} value={value}
                 onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />
             </Field>;

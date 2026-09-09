@@ -49,6 +49,8 @@ describe("CreateContainer", () => {
     await user.click(screen.getByRole("button", { name: /Create container/i }));
     await waitFor(() => expect(posted).toMatchObject({
       name: "research-prod",
+      owner_user_id: null,
+      visibility: "shared",
       template_id: "tpl_1",
       image_variant: "slim",
       config: expect.objectContaining({ model: "claude-sonnet-4-6" }),
@@ -75,6 +77,8 @@ describe("CreateContainer", () => {
     await user.click(screen.getByRole("button", { name: /Create container/i }));
     await waitFor(() => expect(posted).toMatchObject({
       name: "research-prod",
+      owner_user_id: null,
+      visibility: "shared",
       resource_limits: { mem_limit: "1g", cpus: 0.5 },
     }));
   });
@@ -259,7 +263,7 @@ describe("Container ownership", () => {
     }));
     renderWithProviders(<AuthProvider><CreateContainer /></AuthProvider>);
     await userEvent.type(await screen.findByLabelText(/^Name$/), "alice-agent");
-    const picker = await screen.findByLabelText("Owner user");
+    const picker = await screen.findByLabelText("绑定用户（可选）");
     await waitFor(() => expect(picker).toBeEnabled());
     await userEvent.click(picker);
     await userEvent.click(screen.getByRole("option", { name: /Alice/ }));
@@ -279,7 +283,7 @@ describe("Container ownership", () => {
     }));
     renderWithProviders(<AuthProvider><CreateContainer /></AuthProvider>);
     await userEvent.type(await screen.findByLabelText(/^Name$/), "my-agent");
-    expect(screen.queryByLabelText("Owner user")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("绑定用户（可选）")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Create container" }));
     await waitFor(() => expect(posted).not.toBeNull());
     expect(posted).not.toHaveProperty("owner_user_id");

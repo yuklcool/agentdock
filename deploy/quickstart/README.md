@@ -1,6 +1,6 @@
 # AgentDock 镜像快速部署
 
-这套部署只拉取预构建镜像，不需要 Git、Node.js、pip 或本地编译。需要 Linux amd64、Docker Engine、Docker Compose v2 和 Python 3（仅用于首次生成配置）。镜像统一发布到 `ghcr.io/yuklcool/agentdock`，版本为 `0.3.4`。
+这套部署只拉取预构建镜像，不需要 Git、Node.js、pip 或本地编译。需要 Linux amd64、Docker Engine、Docker Compose v2 和 Python 3（仅用于首次生成配置）。镜像统一发布到 `ghcr.io/yuklcool/agentdock`，版本为 `0.3.5`。
 
 ## 首次启动
 
@@ -9,7 +9,7 @@
 ```bash
 mkdir agentdock
 cd agentdock
-curl -fL https://github.com/yuklcool/agentdock/releases/download/v0.3.4/agentdock-deploy.tar.gz -o agentdock-deploy.tar.gz
+curl -fL https://github.com/yuklcool/agentdock/releases/download/v0.3.5/agentdock-deploy.tar.gz -o agentdock-deploy.tar.gz
 tar -xzf agentdock-deploy.tar.gz
 python3 configure.py --email admin@example.com
 docker compose --profile images pull
@@ -42,7 +42,7 @@ docker login ghcr.io -u yuklcool
 
 ## 镜像清单
 
-所有镜像均使用 `ghcr.io/yuklcool/agentdock/<名称>:0.3.4`：
+所有镜像均使用 `ghcr.io/yuklcool/agentdock/<名称>:0.3.5`：
 
 | 名称 | 用途 |
 | --- | --- |

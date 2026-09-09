@@ -295,7 +295,7 @@ export function useCreateContainer() {
     mutationFn: (body: {
       name: string; template_id: string; image_variant: "full" | "slim";
       external_id?: string; config?: AgentConfig;
-      owner_user_id?: string; visibility?: "private" | "shared";
+      owner_user_id?: string | null; visibility?: "private" | "shared";
       resource_limits?: { mem_limit?: string; cpus?: number };
       env_vars?: EnvVar[];
     }) => api.post<Container>("/v1/containers", body),
