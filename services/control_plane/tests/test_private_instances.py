@@ -357,7 +357,7 @@ async def test_member_cannot_select_owner_and_default_is_unchanged(database, own
     member = Principal(tenant_id=tid, user_id=alice, role='member', is_staff=False)
     config = AgentConfig(driver='nanobot', model='gpt-4o')
     async with factory() as db:
-        for target in (alice, bob):
+        for target in (None, alice, bob):
             with pytest.raises(APIError) as exc:
                 await routes.create_container(request, CreateContainerRequest(
                     name='forged', owner_user_id=target, config=config,

@@ -337,8 +337,9 @@ async def create_container(
     lacks a model; 404 (not_found) if ``template_id`` does not exist; 409
     (max_containers_reached) if the tenant is at its container cap; 409
     (external_id_in_use) if a live container already uses the given
-    ``external_id``; 503 (container_not_runnable) if the container fails to become
-    ready (no row is persisted and any partial container/volume is cleaned up).
+    ``external_id``; 409 (user_container_already_bound) for a duplicate user binding.
+    Provisioning reserves a row before Docker work; failures retain an error row
+    and its binding until permanently deleted.
     """
     settings: Settings = request.app.state.settings
     tid = _tid(principal)
@@ -368,7 +369,9 @@ async def create_container(
             raise validation_error(
                 "An owner can only be assigned to a private instance", "owner_user_id"
             )
-    effective_owner_user_id = principal.user_id if visibility == "private" else None
+    effective_owner_user_id = (
+        (body.owner_user_id or principal.user_id) if visibility == "private" else None
+    )
     config, template_id, tpl_runtime = await _resolve_create_config(session, body)
     # Raises validation_error before any Docker work.
     validate_config(config, limits)
@@ -409,14 +412,14 @@ async def create_container(
         {"scope": "agentdock:containers:" + tid},
     )
     # Total-provisioned cap (spec §4.4): every row not in 'destroyed'.
-    if body.owner_user_id is not None:
+    if effective_owner_user_id is not None:
         users, memberships = auth_tables.users, auth_tables.memberships
         target = (
             await session.execute(
                 sa.select(users.c.id)
                 .select_from(users.join(memberships, memberships.c.user_id == users.c.id))
                 .where(
-                    users.c.id == body.owner_user_id,
+                    users.c.id == effective_owner_user_id,
                     users.c.status == "active",
                     users.c.is_staff.is_(False),
                     memberships.c.tenant_id == tid,
