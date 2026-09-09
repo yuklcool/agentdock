@@ -45,8 +45,8 @@ make dev
 在管理后台添加 OpenAI/Anthropic API key，创建 Agent 时选择 **Nanobot**。
 多个实例相互独立；同一个实例目前一次执行一个任务，多个会话分别保存历史。
 支持同一工作空间内的用户私有实例及共享实例。普通成员仅访问自己的私有实例和共享实例；
-管理员可管理本工作空间全部实例。模板页“打开我的智能体”可为每位用户自动创建独立实例，
-个人 API Key、配额、审计和备份恢复见 [运维指南](deploy/OPERATIONS.md)。
+管理员可管理本工作空间全部实例，也可在创建页指定所属用户。
+工作空间 API Key、配额、审计和备份恢复见 [运维指南](deploy/OPERATIONS.md)。
 
 ## Why AgentDock?
 
@@ -303,4 +303,4 @@ Released under the [MIT License](LICENSE).
 
 ## 多用户 Nanobot 与运维
 
-AgentDock 支持按用户自动创建私有 Nanobot 实例、个人 API Key、统一 WebSocket、任务与文件权限隔离、每日配额、监控告警及加密备份恢复。详见 [Nanobot 接入指南](docs/NANOBOT.md) 和 [运维指南](deploy/OPERATIONS.md)。
+AgentDock 支持为用户创建私有 Nanobot 实例、工作空间 API Key、统一 WebSocket、任务与文件权限隔离、每日配额、监控告警及加密备份恢复。详见 [Nanobot 接入指南](docs/NANOBOT.md) 和 [运维指南](deploy/OPERATIONS.md)。

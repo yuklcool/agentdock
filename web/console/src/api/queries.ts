@@ -132,7 +132,7 @@ export function useDeleteFile(cid: string) {
     },
   });
 }
-export const useApiKeys = (personal = false) => useQuery({ queryKey: personal ? [...keys.apiKeys, "personal"] : keys.apiKeys, queryFn: () => api.get<{ keys: ApiKeyRow[] }>(personal ? "/v1/me/api-keys" : "/v1/api-keys") });
+export const useApiKeys = () => useQuery({ queryKey: keys.apiKeys, queryFn: () => api.get<{ keys: ApiKeyRow[] }>("/v1/api-keys") });
 export const useCredentials = () => useQuery({ queryKey: keys.credentials, queryFn: () => api.get<{ credentials: Credential[] }>("/v1/credentials") });
 export const useUsers = (enabled = true, eligibleOwner = false) => useQuery({
   queryKey: eligibleOwner ? [...keys.users, "eligible-owner"] : keys.users,
@@ -302,10 +302,10 @@ export function useCreateContainer() {
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.containers }),
   });
 }
-export function useCreateApiKey(personal = false) {
+export function useCreateApiKey() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => api.post<ApiKeyCreated>(personal ? "/v1/me/api-keys" : "/v1/api-keys", { name }),
+    mutationFn: (name: string) => api.post<ApiKeyCreated>("/v1/api-keys", { name }),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.apiKeys }),
   });
 }

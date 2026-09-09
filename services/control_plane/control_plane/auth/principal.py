@@ -71,22 +71,12 @@ async def resolve_from_inputs(
         candidates = await repo.get_active_api_keys_by_prefix(prefix)
         for row in candidates:
             if verify_password(bearer, row["key_hash"]):
-                owner = row.get("owner_user_id")
-                if owner is not None:
-                    user = await repo.get_user(owner)
-                    memberships = await repo.get_active_memberships(owner)
-                    if (
-                        not user
-                        or user["status"] != "active"
-                        or not any(m["tenant_id"] == row["tenant_id"] for m in memberships)
-                    ):
-                        return None
                 await repo.touch_api_key(row["id"])
                 return Principal(
                     tenant_id=row["tenant_id"],
                     role="member",
                     is_staff=False,
-                    user_id=owner,
+                    user_id=None,
                     auth_method="api_key",
                 )
         return None  # no matching key found

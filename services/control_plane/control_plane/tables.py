@@ -74,7 +74,6 @@ sessions = sa.Table(
 api_keys = sa.Table(
     "api_keys",
     metadata,
-    sa.Column("owner_user_id", sa.Text, sa.ForeignKey("users.id"), nullable=True),
     sa.Column("id", sa.Text, primary_key=True),
     sa.Column("tenant_id", sa.Text, nullable=False),
     sa.Column("name", sa.Text, nullable=False),

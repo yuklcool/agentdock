@@ -16,7 +16,6 @@ function SettingsPanel({ user }: { user: Me }) {
       <div className="fc-panel-head">Settings</div>
       <div className="fc-plist">
         {admin && <NavLink to="/settings/users" className={navCls}><Icons.Users /> Users</NavLink>}
-        <NavLink to="/settings/personal-keys" className={navCls}><Icons.Key /> 个人 API Key</NavLink>
         {admin && <NavLink to="/settings/operations" className={navCls}><Icons.Checklist /> 配额与审计</NavLink>}
         {admin && <NavLink to="/settings/api-keys" className={navCls}><Icons.Key /> API keys</NavLink>}
         {admin && <NavLink to="/settings/credentials" className={navCls}><Icons.Credentials /> Credentials</NavLink>}

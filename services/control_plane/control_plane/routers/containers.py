@@ -340,19 +340,13 @@ async def create_container(
     """
     settings: Settings = request.app.state.settings
     tid = _tid(principal)
-    if (
-        body.external_id
-        and body.external_id.startswith("personal:")
-        and (getattr(request.state, "instance_binding_key", None) != body.external_id)
-    ):
-        raise validation_error("Reserved external id prefix", field="external_id")
     limits = await load_tenant_limits(session, tid)
 
     if not is_manager(principal) and (body.volume_id or body.resources or body.image_tag):
         raise api_error(403, "forbidden", "Custom volumes, host resources and images require admin")
     visibility = body.visibility or ("private" if principal.user_id else "shared")
     if visibility == "private" and principal.user_id is None:
-        raise api_error(403, "forbidden", "Private instances require a personal credential")
+        raise api_error(403, "forbidden", "Private instances require a user session")
     if visibility == "shared" and principal.user_id and not is_manager(principal):
         raise api_error(403, "forbidden", "Only admins can create shared instances")
     if body.owner_user_id is not None:
@@ -471,7 +465,7 @@ async def create_container(
         ).scalar_one()
         cap = int(limits["max_private_containers_per_user"])
         if owned >= cap:
-            raise api_error(409, "private_instance_limit", "Personal instance limit reached")
+            raise api_error(409, "private_instance_limit", "Private instance limit reached")
 
     if body.external_id is not None:
         existing = (

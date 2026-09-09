@@ -120,9 +120,6 @@ P_APIKEY = Principal(tenant_id="ten_1", role="member", is_staff=False, user_id=N
 # Paths are full registered paths (with /v1) matching collect_routes/CONTRACTS.
 # ---------------------------------------------------------------------------
 SELF_SCOPED_MUTATIONS: set[str] = {
-    "/v1/templates/{template_id}/my-agent",
-    "/v1/me/api-keys",
-    "/v1/me/api-keys/{key_id}",
     # Public: unauthenticated POSTs are intentional (no auth dependency).
     "/v1/auth/login",    # creates a session cookie — no prior auth needed
     "/v1/auth/logout",   # revokes session; intentionally unauthenticated
@@ -454,10 +451,6 @@ CONTRACTS: list[tuple[str, str, str, str]] = [
 ]
 
 CONTRACTS += [
-    ('POST', '/v1/templates/{template_id}/my-agent', '/v1/templates/tpl_x/my-agent', "auth"),
-    ('GET', '/v1/me/api-keys', '/v1/me/api-keys', "auth"),
-    ('POST', '/v1/me/api-keys', '/v1/me/api-keys', "auth"),
-    ('DELETE', '/v1/me/api-keys/{key_id}', '/v1/me/api-keys/key_x', "auth"),
     ('GET', '/v1/operations/policy', '/v1/operations/policy', "auth"),
     ('PUT', '/v1/operations/policy', '/v1/operations/policy', "auth"),
     ('GET', '/v1/operations/audit', '/v1/operations/audit', "auth"),

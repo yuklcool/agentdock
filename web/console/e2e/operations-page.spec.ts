@@ -22,6 +22,7 @@ for (const width of [1440, 390]) {
       await route.fulfill({ json: body });
     });
     await page.goto("/settings/operations");
+    await expect(page.locator('a[href="/settings/personal-keys"]')).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "配额与审计", exact: true })).toBeVisible();
     await expect(page.getByText("张三的照明智能体", { exact: true })).toBeVisible();
     await expect(page.getByPlaceholder("不限额")).toHaveCount(4);

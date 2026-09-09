@@ -81,7 +81,6 @@ export const routes: RouteObject[] = [
       { path: "settings/mcp/:id/edit", element: <RequireRole min="admin"><McpEditor /></RequireRole> },
       { path: "settings/users", element: <RequireRole min="admin"><Users /></RequireRole> },
       { path: "settings/operations", element: <RequireRole min="admin"><Operations /></RequireRole> },
-      { path: "settings/personal-keys", element: <ApiKeys personal /> },
       { path: "settings/api-keys", element: <RequireRole min="admin"><ApiKeys /></RequireRole> },
       { path: "settings/credentials", element: <RequireRole min="admin"><Credentials /></RequireRole> },
       { path: "settings/deploy-keys", element: <RequireRole min="admin"><DeployKeys /></RequireRole> },
