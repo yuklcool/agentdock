@@ -80,7 +80,7 @@ export default function ApiKeys() {
           </span>
         </div>
         <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>
-          Workspace credentials for service access to shared AgentDock resources.
+          工作空间服务密钥可调用本空间的公共及用户绑定容器。默认列表仅返回未绑定容器，可用 owner_user_id 查询用户绑定容器。请仅在可信服务端保管密钥。
         </div>
       </div>
 

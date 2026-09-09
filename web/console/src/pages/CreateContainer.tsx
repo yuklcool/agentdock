@@ -168,7 +168,7 @@ export default function CreateContainer() {
           : undefined;
       const ctr = await create.mutateAsync({
         name, template_id: effectiveTemplateId, image_variant: variant, config,
-        ...(admin && ownerId && { owner_user_id: ownerId, visibility: "private" as const }),
+        ...(admin && { owner_user_id: ownerId || null, visibility: ownerId ? "private" as const : "shared" as const }),
         ...(resource_limits && { resource_limits }),
         ...(envTouched && { env_vars: envVars }),
       });
@@ -268,16 +268,16 @@ export default function CreateContainer() {
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
                 {admin && <div className="fluid-w" style={{ flex: "1 1 320px", maxWidth: 480 }}>
-                  <Field label="Owner user" htmlFor="owner-user"
-                    hint="Create a private instance for an active member of this workspace. Their per-user private instance quota applies.">
+                  <Field label="绑定用户（可选）" htmlFor="owner-user"
+                    hint="同一工作空间内，每位用户最多绑定一个容器；暂停和归档仍占用绑定名额。不绑定则创建工作空间公共容器。">
                     <Dropdown id="owner-user" value={ownerId} onChange={setOwnerId} searchable
                       disabled={ownersQuery.isLoading || ownersQuery.isError}
                       options={[
-                        { value: "", label: "Myself (default)" },
+                        { value: "", label: "不绑定" },
                         ...owners.map((u) => ({ value: u.id, label: `${u.name} <${u.email}>` })),
                       ]} />
                   </Field>
-                  {ownersQuery.isError && <Note>Could not load workspace users. Retry or create for yourself.
+                  {ownersQuery.isError && <Note>无法加载工作空间用户。请重试，或创建未绑定容器。
                     <Button variant="ghost" size="sm" onClick={() => ownersQuery.refetch()}>Retry</Button>
                   </Note>}
                 </div>}
@@ -348,9 +348,9 @@ export default function CreateContainer() {
             <div className="nc-rev-body">
               <ReviewRow label="Template" value={chosen?.name ?? null} />
               <ReviewRow label="Name" value={name.trim() || null} mono />
-              {admin && <ReviewRow label="Owner user" value={ownerId
+              {admin && <ReviewRow label="绑定用户（可选）" value={ownerId
                 ? owners.find((u) => u.id === ownerId)?.email ?? ownerId
-                : "Myself (default)"} />}
+                : "不绑定"} />}
               <ReviewRow label="Model" value={model || null} mono />
               <ReviewRow label="Driver" value={chosen?.driver ?? null} mono />
               <ReviewRow label="Image" value={`${variant === "full" ? "Full" : "Slim"}${chosen?.image_variant === variant ? " (template)" : ""}`} />

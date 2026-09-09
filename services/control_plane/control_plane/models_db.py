@@ -380,5 +380,10 @@ Index("idx_audit_ts", audit_log.c.ts.desc())
 
 
 Index("idx_containers_owner", containers.c.tenant_id, containers.c.owner_user_id)
+Index(
+    "uq_container_owner_per_tenant", containers.c.tenant_id, containers.c.owner_user_id,
+    unique=True,
+    postgresql_where=text("owner_user_id IS NOT NULL AND status <> 'destroyed'"),
+)
 
 Index("idx_tasks_actor_date", tasks.c.tenant_id, tasks.c.submitted_by, tasks.c.created_at)

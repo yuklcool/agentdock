@@ -270,9 +270,9 @@ async def test_admin_creation_uses_target_quota_and_existing_access(database, ow
     routes, request, calls = owner_creation
     admin = Principal(tenant_id=tid, user_id=bob, role='admin', is_staff=False)
     async with factory() as db:
-        # Admin already owns two. Alice has one and can receive just one more.
-        await db.execute(containers.update().where(containers.c.id == cids[2])
-                         .values(owner_user_id=bob))
+        # Destroyed history releases Alice's slot; concurrent requests must share it.
+        await db.execute(containers.update().where(containers.c.id == cids[0])
+                         .values(status='destroyed'))
         await db.execute(t.tenants.update().where(t.tenants.c.id == tid)
                          .values(limits={'max_private_containers_per_user': 2}))
         await db.commit()
@@ -290,7 +290,7 @@ async def test_admin_creation_uses_target_quota_and_existing_access(database, ow
                 return exc.code
 
     results = await asyncio.gather(create(), create())
-    assert results.count('private_instance_limit') == 1
+    assert results.count('user_container_already_bound') == 1
     result = next(r for r in results if isinstance(r, dict))
     assert result['owner_user_id'] == alice and len(calls) == 1
     async with factory() as db:
@@ -357,13 +357,15 @@ async def test_member_cannot_select_owner_and_default_is_unchanged(database, own
     member = Principal(tenant_id=tid, user_id=alice, role='member', is_staff=False)
     config = AgentConfig(driver='nanobot', model='gpt-4o')
     async with factory() as db:
-        for target in (alice, bob):
+        for target in (None, alice, bob):
             with pytest.raises(APIError) as exc:
                 await routes.create_container(request, CreateContainerRequest(
                     name='forged', owner_user_id=target, config=config,
                 ), member, db)
             assert exc.value.status_code == 403
         assert not calls
+        await db.execute(containers.update().where(containers.c.owner_user_id == alice)
+                         .values(status='destroyed'))
         created = await routes.create_container(request, CreateContainerRequest(
             name='self-created', config=config,
         ), member, db)
