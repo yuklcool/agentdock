@@ -379,19 +379,6 @@ audit_log = Table(
 Index("idx_audit_ts", audit_log.c.ts.desc())
 
 
-user_agent_bindings = Table(
-    "user_agent_bindings", metadata,
-    Column("tenant_id", Text, ForeignKey("tenants.id"), primary_key=True),
-    Column("user_id", Text, ForeignKey("users.id"), primary_key=True),
-    Column("template_id", Text, ForeignKey("templates.id"), primary_key=True),
-    Column("container_id", Text, ForeignKey("containers.id", ondelete="SET NULL")),
-    Column("lease_id", Text, nullable=False),
-    Column("lease_until", TIMESTAMP(timezone=True), nullable=False),
-    Column("status", Text, nullable=False),
-    Column("created_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
-    Column("updated_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")),
-    CheckConstraint("status IN ('provisioning', 'ready', 'error')", name="binding_status"),
-)
 Index("idx_containers_owner", containers.c.tenant_id, containers.c.owner_user_id)
 
 Index("idx_tasks_actor_date", tasks.c.tenant_id, tasks.c.submitted_by, tasks.c.created_at)

@@ -6,8 +6,8 @@ AgentDock 是可自行部署的智能体容器管理平台。本版本把
 
 ## 已接入的功能
 
-- 管理后台选择 `Nanobot` 驱动，创建多个独立实例；按用户/模板自动创建私有实例。
-- 个人 API Key、实例访问隔离、每日准入配额、审计、监控及加密备份恢复。
+- 管理后台选择 `Nanobot` 驱动，创建多个独立实例；可选择模板并指定所属用户。
+- 工作空间 API Key、实例访问隔离、每日准入配额、审计、监控及加密备份恢复。
 - 复用平台的启动、暂停、恢复、归档、资源限制和持久工作空间。
 - 平台 Task API / SSE 与统一 `/v1/ws` WebSocket 入口。
 - 按实例、按平台 `session_id` 保存 Nanobot `chat_id` 映射。
@@ -92,12 +92,12 @@ Nanobot 子进程，再执行新任务；不会在其他实例中重启进程。
 
 ## REST 与 SSE
 
-创建实例后，`agent_id` 即平台返回的容器/实例 id。私有实例使用所属用户的个人 API key
-或登录会话；工作空间 API key 仅能访问共享实例：
+创建实例后，`agent_id` 即平台返回的容器/实例 id。私有实例通过所属用户或管理员的登录会话访问。
+以下服务端示例使用工作空间 API Key，目标必须是共享实例；密钥表示空间级服务身份，不携带用户身份：
 
 ```http
 POST /v1/containers/{agent_id}/tasks
-Authorization: Bearer <个人 API key>
+Authorization: Bearer <工作空间 API Key>
 Content-Type: application/json
 
 {"prompt":"分析昨晚报警","session_id":"lighting-session-001"}
@@ -108,7 +108,7 @@ Content-Type: application/json
 ```http
 GET /v1/containers/{agent_id}/tasks/{task_id}/events
 Accept: text/event-stream
-Authorization: Bearer <个人 API key>
+Authorization: Bearer <工作空间 API Key>
 ```
 
 后续消息使用相同 `session_id` 继续会话；新会话使用新 id。省略 session_id 表示独立一次性任务。
@@ -200,7 +200,7 @@ Skills 使用平台已经解析的文本或 Git bundle。更新时只替换本�
 
 ## 私有实例与运行边界
 
-- 支持同一工作空间内的用户私有实例、模板自动创建和个人 API Key。普通成员只能访问自己的实例
+- 支持同一工作空间内的用户私有实例、模板配置和工作空间 API Key。普通成员只能访问自己的实例
   与共享实例；租户管理员可管理本租户实例。升级前实例保留为共享。详见[运维指南](../deploy/OPERATIONS.md)。
 - 超时由 Driver 强制执行；迭代上限和单次生成 token 上限传入 Nanobot。完整 token 用量在回合结束时
   回传，尚不能保证在总 token 配额中途耗尽时即时停止；不要将其作为严格费用控制边界。
@@ -279,7 +279,7 @@ GitHub Actions 结果为准。生产上线仍需使用自己的模型凭据、�
 
 API：`POST /v1/containers`，管理员可传入 `visibility: "private"` 和 `owner_user_id`。共享实例不能同时指定归属用户。配额按照实际归属人计算，并发创建复用数据库名额预留机制；审计保留实际操作者和目标归属人。管理员实例列表显示 Owner user，成员失效后无法解析姓名时回退展示用户 ID。
 
-该功能不自动迁移已有实例的归属，不改变 `user_agent_bindings` 的模板绑定逻辑；注册用户本身也不会立即创建实例。升级平台到 0.3.2 即可使用，已有运行容器无需为本功能重建。
+该功能不自动迁移已有实例的归属；注册用户本身也不会立即创建实例。升级平台到 0.3.2 即可使用，已有运行容器无需为本功能重建。
 
 ### 配额与审计页面（0.3.3）
 

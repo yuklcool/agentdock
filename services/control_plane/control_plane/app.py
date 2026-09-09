@@ -508,8 +508,6 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(console_router, prefix="/v1")
     from control_plane.routers.nanobot_ws import router as nanobot_ws_router
     app.include_router(nanobot_ws_router, prefix="/v1")
-    from control_plane.routers.personal_agents import router as personal_agents_router
-    app.include_router(personal_agents_router, prefix="/v1")
     from control_plane.routers.operations import router as operations_router
     app.include_router(operations_router, prefix="/v1")
     app.include_router(git_router, prefix="/v1")

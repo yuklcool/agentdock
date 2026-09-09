@@ -269,7 +269,7 @@ export default function CreateContainer() {
               <div style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
                 {admin && <div className="fluid-w" style={{ flex: "1 1 320px", maxWidth: 480 }}>
                   <Field label="Owner user" htmlFor="owner-user"
-                    hint="Create a private instance for an active member of this workspace. Their personal instance quota applies.">
+                    hint="Create a private instance for an active member of this workspace. Their per-user private instance quota applies.">
                     <Dropdown id="owner-user" value={ownerId} onChange={setOwnerId} searchable
                       disabled={ownersQuery.isLoading || ownersQuery.isError}
                       options={[

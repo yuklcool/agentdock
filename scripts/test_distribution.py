@@ -23,12 +23,13 @@ def main():
         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
     )
 
-    def request(path, data=None, method=None, opener=client):
+    def request(path, data=None, method=None, opener=client, authorization=None):
         req = urllib.request.Request(
             base + path,
             data=json.dumps(data).encode() if data is not None else None,
             method=method,
-            headers={"Content-Type": "application/json", "Origin": base},
+            headers={"Content-Type": "application/json", "Origin": base,
+                     **({"Authorization": authorization} if authorization else {})},
         )
         with opener.open(req, timeout=120) as response:
             return response.read()
@@ -113,6 +114,33 @@ def main():
                     assert exc.code == 404
                 else:
                     raise AssertionError('Another member could access the private instance')
+        workspace_key = json.loads(request('/v1/api-keys', {'name': 'distribution service'}))
+        key_id = workspace_key['id']
+        service = urllib.request.build_opener()  # no user session cookie
+        authorization = 'Bearer ' + workspace_key['key']
+        try:
+            keys = json.loads(request('/v1/api-keys'))['keys']
+            assert key_id in {key['id'] for key in keys}
+            assert workspace_key['key'] not in json.dumps(keys)
+            listed = json.loads(request('/v1/containers', opener=service,
+                                        authorization=authorization))['containers']
+            assert cid not in {row['id'] for row in listed}
+            for method, path in [('GET', '/v1/me/api-keys'),
+                                 ('POST', '/v1/templates/retired/my-agent')]:
+                try:
+                    request(path, method=method)
+                except urllib.error.HTTPError as exc:
+                    assert exc.code == 404
+                else:
+                    raise AssertionError('Retired endpoint still exists')
+        finally:
+            request(f'/v1/api-keys/{key_id}', method='DELETE')
+        try:
+            request('/v1/containers', opener=service, authorization=authorization)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+        else:
+            raise AssertionError('Revoked workspace key still authenticates')
         events = json.loads(request('/v1/operations/audit'))['events']
         created = next(
             e for e in events if e['action'] == 'container.create' and e['target_id'] == cid

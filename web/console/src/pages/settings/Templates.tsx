@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTemplates, keys } from "../../api/queries";
 import { api, ApiError } from "../../api/client";
@@ -12,7 +12,7 @@ import { Icons } from "../../ui/Icon";
 import { EmptyState } from "../../ui/EmptyState";
 import { driverIcon, driverLabel } from "../../lib/drivers";
 import { isAdmin } from "../../lib/roles";
-import type { Container, Template } from "../../api/types";
+import type { Template } from "../../api/types";
 
 export default function Templates() {
   const { user } = useAuth();
@@ -20,8 +20,6 @@ export default function Templates() {
   const { data } = useTemplates();
   const qc = useQueryClient();
   const toast = useToast();
-  const navigate = useNavigate();
-  const [starting, setStarting] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Template | null>(null);
   const [query, setQuery] = useState("");
   const templates = data?.templates ?? [];
@@ -30,21 +28,6 @@ export default function Templates() {
     t.name.toLowerCase().includes(query.toLowerCase()) || t.driver.toLowerCase().includes(query.toLowerCase());
   const builtins = templates.filter((t) => t.is_builtin && match(t));
   const tenant = templates.filter((t) => !t.is_builtin && match(t));
-
-  async function openMyAgent(t: Template) {
-    setStarting(t.id);
-    try {
-      const result = await api.post<{ container: Container; created: boolean }>(
-        `/v1/templates/${t.id}/my-agent`, {},
-      );
-      await qc.invalidateQueries({ queryKey: keys.containers });
-      navigate(`/containers/${result.container.id}/submit`);
-    } catch (err) {
-      toast.error("无法打开个人实例", err instanceof ApiError ? err.message : undefined);
-    } finally {
-      setStarting(null);
-    }
-  }
 
   async function clone(t: Template) {
     try {
@@ -112,11 +95,6 @@ export default function Templates() {
           )}
 
           <div style={{ display: "flex", gap: 6 }}>
-            {t.driver === "nanobot" && t.model && (
-              <Button size="sm" disabled={starting !== null} onClick={() => openMyAgent(t)}>
-                {starting === t.id ? "正在准备…" : "打开我的智能体"}
-              </Button>
-            )}
             {admin && !t.is_builtin && (
               <Link to={`/settings/templates/${t.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>
             )}

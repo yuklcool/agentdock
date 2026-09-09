@@ -1,7 +1,7 @@
 """One ownership policy for HTTP, WebSocket, lists and aggregate queries.
 
 NULL ownership is explicitly shared within a tenant (including legacy rows).
-Personal API keys carry a user id; workspace keys cannot access private rows.
+User sessions carry a user id; workspace keys cannot access private rows.
 Background services use unscoped sessions after validating their stored target.
 """
 
