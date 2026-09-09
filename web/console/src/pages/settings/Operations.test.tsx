@@ -20,7 +20,7 @@ function setup(events: AuditEvent[] = [event]) {
 }
 test("groups quotas, displays zero as unlimited and saves numeric limits", async () => {
   setup(); let saved: unknown;
-  server.use(http.put("/v1/operations/policy", async ({ request }) => { saved = await request.json(); return HttpResponse.json(saved); }));
+  server.use(http.put("/v1/operations/policy", async ({ request }) => { saved = await request.json(); return HttpResponse.json(saved as typeof policy); }));
   renderWithProviders(<Operations />);
   const field = await screen.findByLabelText("每人每日任务数");
   for (const name of ["实例限制", "工作空间每日限额", "单用户每日限额"]) expect(screen.getByRole("heading", { name })).toBeInTheDocument();
@@ -72,7 +72,7 @@ test("filters recent events by action, user and resource and clears filters", as
 test("clearing daily limit saves zero; instance count stays required", async () => {
   setup(); let saved: unknown;
   server.use(http.get("/v1/operations/policy", () => HttpResponse.json({ ...policy, daily_task_limit: 50 })),
-    http.put("/v1/operations/policy", async ({ request }) => { saved = await request.json(); return HttpResponse.json(saved); }));
+    http.put("/v1/operations/policy", async ({ request }) => { saved = await request.json(); return HttpResponse.json(saved as typeof policy); }));
   renderWithProviders(<Operations />);
   await userEvent.clear(await screen.findByLabelText("工作空间每日任务数"));
   expect(screen.getByLabelText("每人最多私有实例数")).toBeRequired();

@@ -15,3 +15,5 @@ docker compose up -d --no-build --wait
 ```
 
 刷新浏览器，进入 Settings → 配额与审计。已有智能体容器无需因本功能重建。8 个组件统一发布 0.3.3 镜像标签，Linux amd64。
+
+验证包含真实 PostgreSQL 名称关联、跨工作空间隔离和敏感字段过滤，以及桌面/手机页面交互检查。
