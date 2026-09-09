@@ -45,6 +45,15 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - name: Operations desktop and mobile browser checks
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test --config playwright.operations.config.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: operations-browser-results
+          path: web/console/test-results/
 
   integration:
     # Broader legacy service integration is still available on manual runs.

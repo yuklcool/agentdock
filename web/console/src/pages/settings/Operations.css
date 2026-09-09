@@ -1,0 +1,34 @@
+.operations-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.operations-header h1 { font-size: 22px; font-weight: 800; letter-spacing: -.02em; margin: 0; }
+.operations-header p, .operations-muted { font-size: 13px; color: var(--muted); }
+.operations-header p { margin: 4px 0 0; }
+.operations-quota-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.operations-fields { display: grid; gap: 16px; }
+.operations-hint { margin: 12px 4px 0; font-size: 12px; color: var(--muted); }
+.operations-hint summary { cursor: pointer; width: fit-content; }
+.operations-hint p { max-width: 760px; margin: 8px 0; }
+.operations-page .card-head h2, .operations-dialog h2 { font-size: 15px; font-weight: 700; margin: 0; }
+.operations-filters { display: flex; gap: 10px; flex-wrap: wrap; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.operations-filters > .input { flex: 1; min-width: 180px; }
+.operations-table { min-width: 790px; }
+.operations-table td { max-width: 280px; overflow-wrap: anywhere; }
+.operations-table td:first-child { white-space: nowrap; }
+.operations-table strong { font-weight: 600; }
+.operations-table small, .operations-details small { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
+.operations-person { display: flex; gap: 10px; align-items: center; }
+.operations-person .avatar { flex-shrink: 0; }
+.operations-audit-row { cursor: pointer; }
+.operations-overlay { position: fixed; inset: 0; z-index: 1100; background: rgb(0 0 0 / .4); display: grid; place-items: center; padding: 20px; }
+.operations-dialog { width: min(100%, 580px); max-height: 90vh; overflow: auto; box-shadow: var(--sh-2); }
+.operations-dialog h3 { font-size: 13px; margin: 20px 0 12px; }
+.operations-details { display: grid; grid-template-columns: 115px minmax(0, 1fr); gap: 12px; font-size: 13px; margin-top: 20px; }
+.operations-details dt { color: var(--muted); }
+.operations-details dd { margin: 0; overflow-wrap: anywhere; }
+.operations-technical { border-top: 1px solid var(--border); padding-top: 16px; }
+.operations-technical dd { font-family: var(--mono, monospace); font-size: 12px; }
+@media (max-width: 1000px) { .operations-quota-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .operations-header { align-items: flex-start; flex-direction: column; }
+  .operations-filters .dd { width: 100% !important; }
+  .operations-page .card-head { flex-wrap: wrap; }
+}

@@ -113,6 +113,23 @@ def main():
                     assert exc.code == 404
                 else:
                     raise AssertionError('Another member could access the private instance')
+        events = json.loads(request('/v1/operations/audit'))['events']
+        created = next(
+            e for e in events if e['action'] == 'container.create' and e['target_id'] == cid
+        )
+        assert created['action_label'] == '创建容器'
+        assert created['target']['name'] == 'distribution-acceptance'
+        assert created['container']['id'] == cid
+        assert created['actor']['name']
+        assert 'details' not in created
+        assert created['tenant_id'] == 'ten_seed'
+        for _, opener in members:
+            try:
+                request('/v1/operations/audit', opener=opener)
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 403
+            else:
+                raise AssertionError('Ordinary member could access audit records')
         subprocess.run(
             [
                 "docker",
