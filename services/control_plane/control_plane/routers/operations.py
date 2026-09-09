@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from control_plane.audit import audit
+from control_plane.audit_view import enrich_events
 from control_plane.auth.principal import Principal, require_session_admin, require_staff
 from control_plane.models_db import audit_log, containers, tasks, tenants
 from control_plane.routers.containers import _session, _tid, load_tenant_limits
@@ -82,20 +83,26 @@ async def audit_history(
                 .where(
                     sa.or_(
                         audit_log.c.details["tenant_id"].astext == tid,
-                        sa.and_(audit_log.c.target_type == "tenant", audit_log.c.target_id == tid),
                         sa.and_(
-                            audit_log.c.target_type == "container", audit_log.c.target_id.in_(owned)
+                            audit_log.c.details["tenant_id"].astext.is_(None),
+                            audit_log.c.target_type == "tenant",
+                            audit_log.c.target_id == tid,
+                        ),
+                        sa.and_(
+                            audit_log.c.details["tenant_id"].astext.is_(None),
+                            audit_log.c.target_type == "container",
+                            audit_log.c.target_id.in_(owned),
                         ),
                     )
                 )
-                .order_by(audit_log.c.ts.desc())
+                .order_by(audit_log.c.ts.desc(), audit_log.c.id.desc())
                 .limit(limit)
             )
         )
         .mappings()
         .all()
     )
-    return {"events": [dict(row) for row in rows]}
+    return {"events": await enrich_events(session, tid, list(rows))}
 
 
 async def _metrics_session(
