@@ -17,6 +17,7 @@ import re
 import secrets
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -324,6 +325,121 @@ async def receive(ws: ClientConnection, expected: str) -> dict[str, Any]:
                 return frame
 
 
+def _tool_value_text(value: Any) -> str:
+    """Normalize Nanobot tool result/error values for AgentDock's text event contract."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _tool_duration_ms(
+    event: dict[str, Any], started: dict[str, float], call_id: str
+) -> int | None:
+    """Prefer a native duration, otherwise measure start -> terminal phase locally."""
+    raw = event.get("duration_ms")
+    began = started.pop(call_id, None)
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return max(0, int(raw))
+    if began is None:
+        return None
+    return max(0, int((time.monotonic() - began) * 1000))
+
+
+async def _emit_tool_events(
+    raw_events: Any, emit: EmitFn, started: dict[str, float]
+) -> bool:
+    """Translate Nanobot WebSocket tool_events into AgentDock's stable event schema."""
+    if not isinstance(raw_events, list):
+        return False
+    emitted = False
+    for raw in raw_events:
+        if not isinstance(raw, dict):
+            continue
+        phase = str(raw.get("phase", "")).lower()
+        call_id_raw = raw.get("call_id")
+        if not isinstance(call_id_raw, str) or not call_id_raw:
+            continue
+        call_id = call_id_raw
+        if phase == "start":
+            started[call_id] = time.monotonic()
+            name = raw.get("name")
+            await emit(
+                "tool_call",
+                {
+                    "tool_use_id": call_id,
+                    "name": name if isinstance(name, str) and name else "tool",
+                    "input": raw.get("arguments", {}),
+                },
+            )
+            emitted = True
+            continue
+        if phase not in {"end", "error"}:
+            continue
+        value = raw.get("result") if phase == "end" else raw.get("error")
+        if value is None:
+            extras = {
+                key: raw[key]
+                for key in ("files", "embeds")
+                if raw.get(key) not in (None, [], {})
+            }
+            value = extras or None
+        payload: dict[str, Any] = {
+            "tool_use_id": call_id,
+            "ok": phase == "end",
+            "content": _tool_value_text(value),
+        }
+        duration_ms = _tool_duration_ms(raw, started, call_id)
+        if duration_ms is not None:
+            payload["duration_ms"] = duration_ms
+        await emit("tool_result", payload)
+        emitted = True
+    return emitted
+
+
+def _file_operation(raw: Any) -> str:
+    value = str(raw or "").lower()
+    if value in {"add", "added", "create", "created", "new"}:
+        return "create"
+    if value in {"delete", "deleted", "remove", "removed"}:
+        return "delete"
+    return "modify"
+
+
+async def _emit_file_edit(frame: dict[str, Any], emit: EmitFn) -> bool:
+    """Normalize Nanobot file_edit frames to the existing file_changed event."""
+    phase = str(frame.get("phase", "")).lower()
+    if phase in {"start", "starting", "error", "failed"}:
+        return False
+    raw_edits = frame.get("edits")
+    edits = raw_edits if isinstance(raw_edits, list) else [frame]
+    emitted = False
+    for raw in edits:
+        if not isinstance(raw, dict):
+            continue
+        path = raw.get("path") or frame.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        payload: dict[str, Any] = {
+            "operation": _file_operation(
+                raw.get("operation") or raw.get("op") or raw.get("action")
+            ),
+            "path": path,
+        }
+        for key in ("diff", "added", "deleted", "old_path", "new_path"):
+            if key in raw:
+                payload[key] = raw[key]
+            elif key in frame:
+                payload[key] = frame[key]
+        await emit("file_changed", payload)
+        emitted = True
+    return emitted
+
+
 class NanobotDriver:
     name = "nanobot"
     capabilities = DriverCapabilities(
@@ -451,6 +567,7 @@ class NanobotDriver:
     async def consume(ws: ClientConnection, chat_id: str, emit: EmitFn) -> str:
         streams: dict[str, str] = {}
         final_messages: list[str] = []
+        tool_started: dict[str, float] = {}
         while True:
             frame = json.loads(await ws.recv())
             if not isinstance(frame, dict):
@@ -480,11 +597,17 @@ class NanobotDriver:
                 await emit(str(event), {"text": str(frame.get("text", "")), "stream_id": stream})
             elif event == "message":
                 text = str(frame.get("text", ""))
+                structured = await _emit_tool_events(frame.get("tool_events"), emit, tool_started)
                 if frame.get("kind") in {"progress", "tool_hint"}:
-                    await emit("log", {"level": "info", "message": text})
-                else:
+                    # Structured tool events supersede their breadcrumb text. Keep the
+                    # legacy log fallback only when no structured event was emitted.
+                    if not structured and text.strip():
+                        await emit("log", {"level": "info", "message": text})
+                elif text:
                     final_messages.append(text)
                     await emit("assistant_message", {"content": [{"type": "text", "text": text}]})
+            elif event == "file_edit":
+                await _emit_file_edit(frame, emit)
             elif event == "turn_end":
                 usage = frame.get("usage")
                 if isinstance(usage, dict):
