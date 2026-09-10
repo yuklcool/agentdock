@@ -156,3 +156,22 @@ it("No session clears only the session query parameter and preserves an empty ch
   expect(screen.getByText("Start a conversation")).toBeInTheDocument();
   expect(posted).toHaveLength(0);
 });
+
+
+it("switching to Form during a send preserves newly edited shared draft", async () => {
+  setup(); let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  server.use(http.post("/v1/containers/con_1/tasks", async ({ request }) => {
+    posted.push(await request.json() as typeof posted[number]);
+    await gate;
+    return HttpResponse.json({ task_id: "tsk_form_late", status: "running" });
+  }));
+  mount(); await send("old chat");
+  await waitFor(() => expect(posted).toHaveLength(1));
+  await userEvent.click(screen.getByRole("button", { name: "Form" }));
+  const input = screen.getByLabelText("Prompt");
+  await userEvent.clear(input); await userEvent.type(input, "form draft");
+  release();
+  await waitFor(() => expect(screen.getByRole("button", { name: /^Submit task$/ })).toBeEnabled());
+  expect(input).toHaveValue("form draft");
+});

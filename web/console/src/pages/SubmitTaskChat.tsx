@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, Textarea } from "../ui";
 import { Icons } from "../ui/Icon";
 import { PromptPicker } from "../ui/PromptPicker";
@@ -91,6 +91,11 @@ export function SubmitTaskChat({
   // the latest turn.
   const pinned = useRef(true);
   const sending = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const active = useRef({ sessionId, prompt });
   active.current = { sessionId, prompt };
 
@@ -140,6 +145,7 @@ export function SubmitTaskChat({
       // Retain the lazy id after errors so retry stays in the same conversation.
       if (!sessionId) onSessionChange(targetSession);
       const res = await submit.mutateAsync(buildPayload(text, targetSession));
+      if (!mounted.current) return;
       setPending((prev) => [...prev, { taskId: res.task_id, prompt: text, status: "running", sessionId: targetSession }]);
       // A response for an old selection must not clear a newly edited draft.
       if (active.current.sessionId === targetSession) {
@@ -148,7 +154,7 @@ export function SubmitTaskChat({
         stickToBottom();
       }
     } catch (err) {
-      onError(err);
+      if (mounted.current) onError(err);
     } finally {
       sending.current = false;
     }
