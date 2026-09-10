@@ -71,8 +71,8 @@ describe("SkillArchiveImportDialog", () => {
     });
     fireEvent.change(input, { target: { files: [file] } });
 
-    expect(await screen.findByText("lighting-sql")).toBeInTheDocument();
-    expect(screen.getByText("lighting-health")).toBeInTheDocument();
+    expect(await screen.findAllByText("lighting-sql")).toHaveLength(2);
+    expect(screen.getAllByText("lighting-health")).toHaveLength(2);
     expect(screen.getByText("已安装")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入 1 个技能" })).toBeEnabled();
 
