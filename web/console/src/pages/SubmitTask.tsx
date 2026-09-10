@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useContainer, useTemplates, useSubmitTask, useTasks } from "../api/queries";
 import { useAuth } from "../auth/useAuth";
 import { useToast } from "../components/Toast";
@@ -16,6 +16,21 @@ const LAYOUT_KEY = "agentdock.submitLayout";
 
 export default function SubmitTask() {
   const { cid } = useParams<{ cid: string }>();
+  // Container navigation must discard drafts and optimistic turns from the old container.
+  return <SubmitTaskPage key={cid} cid={cid!} />;
+}
+
+function SubmitTaskPage({ cid }: { cid: string }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sessionId = searchParams.get("session") || null;
+  function setSessionId(id: string | null) {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if (id) next.set("session", id);
+      else next.delete("session");
+      return next;
+    });
+  }
   const navigate = useNavigate();
   const toast = useToast();
   const containerQ = useContainer(cid!);
@@ -40,7 +55,6 @@ export default function SubmitTask() {
   const [maxIter, setMaxIter] = useState<number | null>(null);
   const [maxTokens, setMaxTokens] = useState<number | null>(null);
   const [timeoutS, setTimeoutS] = useState<number | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
   // Per-task effort override. null ⇒ inherit the container's configured effort (or the model's own default).
   const [effort, setEffort] = useState<Effort | null>(null);
 
@@ -75,7 +89,7 @@ export default function SubmitTask() {
   const tokensDefault = config.max_tokens ?? tenantLimits?.default_max_tokens;
   const timeoutDefault = config.timeout_seconds ?? tenantLimits?.default_task_timeout_seconds;
 
-  function buildPayload(text: string) {
+  function buildPayload(text: string, selectedSession: string | null = sessionId) {
     const output =
       outputType === "structured" && schema.ok && schema.value
         ? { type: "structured" as const, schema: schema.value }
@@ -86,7 +100,7 @@ export default function SubmitTask() {
       limits: { max_iterations: maxIter, max_tokens: maxTokens, timeout_seconds: timeoutS },
       metadata: {},
       ...(effort ? { effort } : {}),
-      ...(sessionId ? { session_id: sessionId } : {}),
+      ...(selectedSession ? { session_id: selectedSession } : {}),
     };
   }
 
@@ -183,6 +197,7 @@ export default function SubmitTask() {
           config={config}
           recentTasks={tasksQ.data?.tasks ?? []}
           sessionId={sessionId}
+          onSessionChange={setSessionId}
           submit={submit}
           buildPayload={buildPayload}
           prompt={prompt}

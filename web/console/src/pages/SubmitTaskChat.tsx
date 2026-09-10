@@ -2,6 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, Textarea } from "../ui";
 import { Icons } from "../ui/Icon";
 import { PromptPicker } from "../ui/PromptPicker";
+import { newSessionId } from "../lib/sessions";
 import { appendPrompt } from "../lib/prompt";
 import { ChatTurn } from "../components/ChatTurn";
 import { EffortField } from "../components/EffortField";
@@ -19,6 +20,7 @@ export function SubmitTaskChat({
   config,
   recentTasks,
   sessionId,
+  onSessionChange,
   submit,
   buildPayload,
   prompt,
@@ -48,12 +50,11 @@ export function SubmitTaskChat({
   cid: string;
   config: AgentConfig;
   recentTasks: TaskSummary[];
-  // The currently selected session (from SessionPicker); null means "no
-  // session" — the thread then shows only tasks that also have no session,
-  // not every task in the container.
+  // Null is a fresh conversation, never a thread of unrelated standalone tasks.
   sessionId: string | null;
+  onSessionChange: (sessionId: string) => void;
   submit: { mutateAsync: (body: unknown) => Promise<{ task_id: string; status: string }>; isPending: boolean };
-  buildPayload: (prompt: string) => unknown;
+  buildPayload: (prompt: string, sessionId: string) => unknown;
   prompt: string;
   setPrompt: (v: string) => void;
   outputType: OutputType;
@@ -89,13 +90,15 @@ export function SubmitTaskChat({
   // chat view — and content streaming/loading in afterwards — always lands on
   // the latest turn.
   const pinned = useRef(true);
+  const sending = useRef(false);
+  const active = useRef({ sessionId, prompt });
+  active.current = { sessionId, prompt };
 
-  // Scoped to the selected session (null ⇒ only tasks that also have no
-  // session — not every task in the container), shown oldest→newest, then
-  // pending sends for the same session not yet reflected in the history,
-  // deduped by task id.
+  // Only a real session forms a conversation. Standalone tasks stay in History.
+  // Show oldest→newest, then optimistic turns not yet returned by the API.
   const turns = useMemo<Turn[]>(() => {
-    const scoped = recentTasks.filter((t) => (sessionId ? t.session_id === sessionId : !t.session_id));
+    if (!sessionId) return [];
+    const scoped = recentTasks.filter((t) => t.session_id === sessionId);
     const history = scoped
       .slice()
       .reverse()
@@ -116,6 +119,7 @@ export function SubmitTaskChat({
   }
 
   // Land at the bottom on entry and whenever the turn list changes.
+  useLayoutEffect(() => { pinned.current = true; stickToBottom(); }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => { stickToBottom(); }, [turns.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Release the pin when the user scrolls up (so we never yank the viewport
@@ -128,15 +132,25 @@ export function SubmitTaskChat({
 
   async function send() {
     const text = prompt.trim();
-    if (!text || schemaBlocksSubmit || submit.isPending) return;
+    if (!text || schemaBlocksSubmit || submit.isPending || sending.current) return;
+    sending.current = true;
     try {
-      const res = await submit.mutateAsync(buildPayload(text));
-      setPending((prev) => [...prev, { taskId: res.task_id, prompt: text, status: "running", sessionId }]);
-      setPrompt("");
-      pinned.current = true; // sending always jumps to the new turn
-      stickToBottom();
+      const targetSession = sessionId ?? newSessionId();
+      // Pass explicitly: React/URL updates need not render before the request.
+      // Retain the lazy id after errors so retry stays in the same conversation.
+      if (!sessionId) onSessionChange(targetSession);
+      const res = await submit.mutateAsync(buildPayload(text, targetSession));
+      setPending((prev) => [...prev, { taskId: res.task_id, prompt: text, status: "running", sessionId: targetSession }]);
+      // A response for an old selection must not clear a newly edited draft.
+      if (active.current.sessionId === targetSession) {
+        if (active.current.prompt === prompt) setPrompt("");
+        pinned.current = true;
+        stickToBottom();
+      }
     } catch (err) {
       onError(err);
+    } finally {
+      sending.current = false;
     }
   }
 
@@ -154,6 +168,9 @@ export function SubmitTaskChat({
           <div className="chat-empty">
             <span className="ico"><Icons.Bot w={24} /></span>
             <span className="h">Start a conversation</span>
+            <span>{sessionId
+              ? "新会话在发送第一条消息后创建；已有会话将继续原有上下文。"
+              : "发送第一条消息时自动创建连续会话。独立任务请在 History 中查看。"}</span>
             <span>
               Send a task and the agent's response streams in here. Each task inherits this
               container's <span className="mono">{config.driver}</span> · <span className="mono">{config.model}</span> config.
