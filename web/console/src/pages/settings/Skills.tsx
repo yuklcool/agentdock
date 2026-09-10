@@ -10,21 +10,24 @@ import { SegControl } from "../../ui/SegControl";
 import { Icons } from "../../ui/Icon";
 import { repoLabel } from "../../lib/skillSource";
 import type { Skill } from "../../api/types";
+import { SkillArchiveImportDialog } from "./SkillArchiveImportDialog";
 
-type Filter = "all" | "inline" | "git";
+type Filter = "all" | "inline" | "git" | "archive";
 
-/** Type glyph tile — Puzzle for inline skills, Code for git-sourced. */
-function SkillGlyph({ git }: { git: boolean }) {
+/** Type glyph tile — Puzzle for inline, Code for git, File for uploaded archives. */
+function SkillGlyph({ source }: { source: string }) {
+  const git = source === "git";
+  const archive = source === "archive";
   return (
     <div
       aria-hidden
       style={{
         width: 34, height: 34, borderRadius: 9, flex: "0 0 34px",
         display: "grid", placeItems: "center", color: "var(--ink)",
-        background: git ? "var(--surface-3)" : "var(--p-300)",
+        background: git || archive ? "var(--surface-3)" : "var(--p-300)",
       }}
     >
-      {git ? <Icons.Code w={17} /> : <Icons.Puzzle w={17} />}
+      {git ? <Icons.Code w={17} /> : archive ? <Icons.File w={17} /> : <Icons.Puzzle w={17} />}
     </div>
   );
 }
@@ -40,14 +43,16 @@ export default function Skills() {
   const [deleting, setDeleting] = useState<Skill | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [archiveOpen, setArchiveOpen] = useState(false);
 
   const skills = data?.skills ?? [];
-  const gitCount = skills.filter((s) => s.source_type === "git").length;
+  const gitCount = skills.filter((s) => String(s.source_type) === "git").length;
+  const archiveCount = skills.filter((s) => String(s.source_type) === "archive").length;
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return skills.filter((s) => {
-      if (filter !== "all" && s.source_type !== filter) return false;
+      if (filter !== "all" && String(s.source_type) !== filter) return false;
       if (!q) return true;
       return s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q);
     });
@@ -63,10 +68,14 @@ export default function Skills() {
     catch (err) { toast.error("Couldn't refresh skill", err instanceof ApiError ? err.message : undefined); }
   }
 
+  const sourceBits = [
+    gitCount > 0 ? `${gitCount} from git` : "",
+    archiveCount > 0 ? `${archiveCount} uploaded` : "",
+  ].filter(Boolean);
   const subtitle = isLoading || skills.length === 0
     ? "Reusable instructions the opencode and codex drivers load on demand."
     : `${skills.length} skill${skills.length === 1 ? "" : "s"}` +
-      (gitCount > 0 ? ` · ${gitCount} from git` : "");
+      (sourceBits.length ? ` · ${sourceBits.join(" · ")}` : "");
 
   return (
     <div className="page">
@@ -78,15 +87,15 @@ export default function Skills() {
         </div>
       </div>
 
-      {/* While loading we render no "New skill" affordance, so the stable
-          post-load control is the only one the user can target. */}
+      {/* While loading we render no create/upload affordance, so the stable
+          post-load controls are the only ones the user can target. */}
       {isLoading ? (
         <SkillsSkeleton />
       ) : skills.length === 0 ? (
-        <EmptyHero />
+        <EmptyHero onUpload={() => setArchiveOpen(true)} />
       ) : (
         <>
-          {/* Toolbar: search + type filter (left) · New skill (right) */}
+          {/* Toolbar: search + type filter (left) · import/create (right) */}
           <div style={{ display: "flex", alignItems: "stretch", gap: 12, flexWrap: "wrap" }}>
             <div className="search-pill fluid-w" style={{ width: 320, maxWidth: "100%" }}>
               <Icons.Search />
@@ -104,12 +113,21 @@ export default function Skills() {
                 { value: "all", label: "All" },
                 { value: "inline", label: "Inline" },
                 { value: "git", label: "Git" },
+                { value: "archive", label: "Uploaded" },
               ]}
             />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setArchiveOpen(true)}
+              style={{ marginLeft: "auto", gap: 6, padding: "6px 12px 6px 10px" }}
+            >
+              <Icons.File w={14} /> Upload package
+            </Button>
             <Link
               to="/settings/skills/new"
               className="btn btn-primary btn-sm"
-              style={{ marginLeft: "auto", gap: 6, padding: "6px 12px 6px 10px" }}
+              style={{ gap: 6, padding: "6px 12px 6px 10px" }}
             >
               <Icons.Plus w={14} /> New skill
             </Link>
@@ -136,13 +154,15 @@ export default function Skills() {
                   </tr>
                 )}
                 {visible.map((s) => {
-                  const git = s.source_type === "git";
+                  const sourceType = String(s.source_type);
+                  const git = sourceType === "git";
+                  const archive = sourceType === "archive";
                   return (
                     <tr key={s.id}>
                       {/* Skill: glyph + name + description */}
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-                          <SkillGlyph git={git} />
+                          <SkillGlyph source={sourceType} />
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontWeight: 600, fontSize: 13.5 }}>{s.name}</div>
                             <div
@@ -158,10 +178,12 @@ export default function Skills() {
                         </div>
                       </td>
 
-                      {/* Source: type + (git) repo + short sha */}
+                      {/* Source: type + source details */}
                       <td>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
-                          <Pill tone={git ? "info" : "brand"}>{git ? "git" : "inline"}</Pill>
+                          <Pill tone={git ? "info" : archive ? "dormant" : "brand"}>
+                            {git ? "git" : archive ? "uploaded" : "inline"}
+                          </Pill>
                           {git && (
                             <span
                               title={s.source_url ?? undefined}
@@ -180,6 +202,17 @@ export default function Skills() {
                                   <Icons.Key w={10} /> {keyName(s.deploy_key_id) ?? "deploy key"}
                                 </span>
                               )}
+                            </span>
+                          )}
+                          {archive && (
+                            <span
+                              title={[s.source_ref, s.source_subpath].filter(Boolean).join(" / ") || undefined}
+                              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--muted)", fontFamily: "var(--font-mono)" }}
+                            >
+                              <Icons.File w={11} />
+                              <span style={{ maxWidth: 210, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {s.source_ref || "uploaded package"}
+                              </span>
                             </span>
                           )}
                         </div>
@@ -207,7 +240,7 @@ export default function Skills() {
                               <Icons.Refresh w={14} /> Re-pin
                             </Button>
                           )}
-                          <Link to={`/settings/skills/${s.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>
+                          {!archive && <Link to={`/settings/skills/${s.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>}
                           <Button
                             size="sm"
                             variant="danger"
@@ -235,6 +268,7 @@ export default function Skills() {
         onConfirm={() => deleting && onDelete(deleting)}
         onCancel={() => setDeleting(null)}
       />
+      <SkillArchiveImportDialog open={archiveOpen} onClose={() => setArchiveOpen(false)} />
     </div>
   );
 }
@@ -271,7 +305,7 @@ function SkillsSkeleton() {
   );
 }
 
-function EmptyHero() {
+function EmptyHero({ onUpload }: { onUpload: () => void }) {
   return (
     <div className="card" style={{ display: "grid", placeItems: "center", textAlign: "center", padding: "56px 24px", gap: 6 }}>
       <div
@@ -281,9 +315,9 @@ function EmptyHero() {
         <Icons.Puzzle w={24} />
       </div>
       <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em" }}>No skills yet</div>
-      <div style={{ fontSize: 13, color: "var(--muted)", maxWidth: 380 }}>
+      <div style={{ fontSize: 13, color: "var(--muted)", maxWidth: 420 }}>
         Skills are reusable instructions the opencode and codex drivers load on demand. Author one
-        inline, or install a published skill from a git repository.
+        inline, install a published skill from git, or upload a skill package.
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", justifyContent: "center" }}>
         <Link to="/settings/skills/new" className="btn btn-primary btn-sm" style={{ gap: 6, padding: "6px 12px 6px 10px" }}>
@@ -292,6 +326,9 @@ function EmptyHero() {
         <Link to="/settings/skills/new?source=git" className="btn btn-secondary btn-sm" style={{ gap: 6, padding: "6px 12px 6px 10px" }}>
           <Icons.Code w={14} /> Install from git
         </Link>
+        <Button size="sm" variant="secondary" onClick={onUpload} style={{ gap: 6, padding: "6px 12px 6px 10px" }}>
+          <Icons.File w={14} /> Upload package
+        </Button>
       </div>
     </div>
   );

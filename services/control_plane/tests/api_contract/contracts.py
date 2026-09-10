@@ -396,14 +396,16 @@ CONTRACTS: list[tuple[str, str, str, str]] = [
     # ------------------------------------------------------------------
     # AUTH: skills
     # ------------------------------------------------------------------
-    ("GET",    "/v1/skills",              "/v1/skills",              "auth"),
-    ("POST",   "/v1/skills",              "/v1/skills",              "auth"),
-    ("POST",   "/v1/skills/git-refs",     "/v1/skills/git-refs",     "auth"),
-    ("POST",   "/v1/skills/git-discover", "/v1/skills/git-discover", "auth"),
-    ("DELETE", "/v1/skills/{sid}",        "/v1/skills/sk_x",         "auth"),
-    ("GET",    "/v1/skills/{sid}",        "/v1/skills/sk_x",         "auth"),
-    ("PATCH",  "/v1/skills/{sid}",        "/v1/skills/sk_x",         "auth"),
-    ("POST",   "/v1/skills/{sid}/refresh", "/v1/skills/sk_x/refresh", "auth"),
+    ("GET",    "/v1/skills",                 "/v1/skills",                 "auth"),
+    ("POST",   "/v1/skills",                 "/v1/skills",                 "auth"),
+    ("POST",   "/v1/skills/archive-discover", "/v1/skills/archive-discover", "auth"),
+    ("POST",   "/v1/skills/archive-import",   "/v1/skills/archive-import",   "auth"),
+    ("POST",   "/v1/skills/git-refs",        "/v1/skills/git-refs",        "auth"),
+    ("POST",   "/v1/skills/git-discover",    "/v1/skills/git-discover",    "auth"),
+    ("DELETE", "/v1/skills/{sid}",           "/v1/skills/sk_x",            "auth"),
+    ("GET",    "/v1/skills/{sid}",           "/v1/skills/sk_x",            "auth"),
+    ("PATCH",  "/v1/skills/{sid}",           "/v1/skills/sk_x",            "auth"),
+    ("POST",   "/v1/skills/{sid}/refresh",   "/v1/skills/sk_x/refresh",    "auth"),
 
     # ------------------------------------------------------------------
     # AUTH: tasks (tenant-scoped, at /v1/tasks)

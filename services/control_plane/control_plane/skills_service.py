@@ -26,6 +26,7 @@ from agentcore.drivers.skills_md import (
 from agentcore.models import ShimSkill
 from control_plane.errors import api_error
 from control_plane.ids import new_skill_id
+from control_plane.skills_archive import ArchivedSkill
 from control_plane.skills_fetch import FetchedSkill
 
 MAX_BODY = 64 * 1024
@@ -120,10 +121,46 @@ def build_git_skill_row(
     }
 
 
+def build_archive_skill_row(
+    *,
+    tenant_id: str,
+    created_by: str | None,
+    enabled: bool,
+    source_filename: str,
+    archived: ArchivedSkill,
+) -> dict[str, Any]:
+    """Build the persisted row for one validated archive-discovered skill."""
+    if not archived.valid or archived.bundle is None:
+        raise ValueError("cannot persist an invalid archived skill")
+    now = datetime.now(UTC)
+    return {
+        "id": new_skill_id(),
+        "tenant_id": tenant_id,
+        "name": archived.name,
+        "description": normalize_description(archived.description),
+        "body": archived.body,
+        "enabled": enabled,
+        "source_type": "archive",
+        "source_url": None,
+        "source_subpath": archived.subpath,
+        # source_ref is otherwise unused for archive sources; retaining the
+        # original upload name makes the source understandable in API/detail UI.
+        "source_ref": source_filename,
+        "pinned_sha": None,
+        "bundle": archived.bundle,
+        "bundle_sha256": archived.bundle_sha256,
+        "bundle_size": archived.bundle_size,
+        "deploy_key_id": None,
+        "created_by": created_by,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
 def skill_public_view(row: dict[str, Any]) -> dict[str, Any]:
     """List/summary view — tenant_id and the (potentially large) body/bundle
     bytes stripped. Source/pin metadata is included so the console can show
-    where a git skill came from."""
+    where a sourced skill came from."""
     return {
         "id": row["id"],
         "name": row["name"],
@@ -149,12 +186,13 @@ def skill_detail_view(row: dict[str, Any]) -> dict[str, Any]:
 def resolve_skills_for_request(
     selected_ids: list[str], rows: list[dict[str, Any]]
 ) -> list[ShimSkill]:
-    """Map selected skill ids → ShimSkill content, preserving selection order,
-    keeping only enabled rows that belong to the tenant. Git rows ship the
-    cached bundle as base64; inline rows ship the body. The summed uncompressed
-    bundle size is capped per task (MAX_TASK_BUNDLE_BYTES); skills that would
-    push the total over the cap are dropped in selection order and logged
-    (never silently)."""
+    """Map selected skill ids → ShimSkill content, preserving selection order.
+
+    Enabled sourced skills (git or uploaded archives) ship their cached bundle
+    as base64; inline rows ship the body. The summed uncompressed bundle size is
+    capped per task (MAX_TASK_BUNDLE_BYTES); skills that would push the total
+    over the cap are dropped in selection order and logged.
+    """
     by_id = {r["id"]: r for r in rows if r.get("enabled")}
     out: list[ShimSkill] = []
     budget = MAX_TASK_BUNDLE_BYTES
@@ -162,7 +200,7 @@ def resolve_skills_for_request(
         r = by_id.get(sid)
         if r is None:
             continue
-        if r.get("source_type") == "git" and r.get("bundle"):
+        if r.get("bundle"):
             size = r.get("bundle_size") or 0
             if size > budget:
                 log.warning(
