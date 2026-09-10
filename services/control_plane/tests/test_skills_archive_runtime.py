@@ -52,4 +52,4 @@ def test_archive_skill_resolves_as_bundle_not_inline_body() -> None:
     resolved = resolve_skills_for_request(["skl_archive"], rows)
     assert len(resolved) == 1
     assert resolved[0].bundle_b64 == base64.b64encode(b"bundle-bytes").decode()
-    assert resolved[0].body is None
+    assert resolved[0].body == ""
