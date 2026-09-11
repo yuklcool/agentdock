@@ -42,7 +42,7 @@ export function SessionPicker({
   const sessions = sessionsQ.data?.sessions ?? [];
   const current = sessions.find((s) => s.session_id === sessionId);
   const label = sessionId
-    ? `Session ${shortId(sessionId)}${current ? "" : " (new)"}`
+    ? `Session ${shortId(sessionId)}${current ? "" : sessionsQ.isSuccess ? " (new · 发送后创建)" : sessionsQ.isError ? " (无法加载)" : " (加载中…)"}`
     : "No session";
 
   function choose(id: string | null) {
@@ -72,7 +72,7 @@ export function SessionPicker({
               className={"dd-option" + (!sessionId ? " selected" : "")}
               onClick={() => choose(null)}
             >
-              <span>No session</span>
+              <span>No session · Form 独立任务 / Chat 发送后创建会话</span>
               {!sessionId && <Icons.Check w={14} />}
             </button>
             {sessions.map((s) => (

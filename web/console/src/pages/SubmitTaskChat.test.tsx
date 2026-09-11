@@ -82,8 +82,8 @@ describe("SubmitTask chat layout", () => {
   it("scrolls to the bottom on entering chat, even as transcripts load in", async () => {
     setup();
     server.use(http.get("/v1/containers/con_1/tasks", () => HttpResponse.json({ tasks: [
-      { task_id: "tsk_b", status: "completed", prompt: "Second prompt", started_at: "t", ended_at: "t", tokens_in: 1, tokens_out: 2, iterations_used: 1 },
-      { task_id: "tsk_a", status: "completed", prompt: "First prompt", started_at: "t", ended_at: "t", tokens_in: 1, tokens_out: 2, iterations_used: 1 },
+      { task_id: "tsk_b", status: "completed", prompt: "Second prompt", started_at: "t", ended_at: "t", tokens_in: 1, tokens_out: 2, iterations_used: 1, session_id: "sess-history" },
+      { task_id: "tsk_a", status: "completed", prompt: "First prompt", started_at: "t", ended_at: "t", tokens_in: 1, tokens_out: 2, iterations_used: 1, session_id: "sess-history" },
     ] })));
     server.use(http.get("/v1/containers/con_1/tasks/:tid", ({ params }) => HttpResponse.json({
       task_id: params.tid, status: "completed", prompt: "x", started_at: "t", ended_at: "t", tokens_in: 1, tokens_out: 2, iterations_used: 1, result: null, error: null,
@@ -98,7 +98,7 @@ describe("SubmitTask chat layout", () => {
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
       return 100 + (this.textContent?.length ?? 0) * 2;
     });
-    renderWithProviders(<AuthProvider><SubmitTask /></AuthProvider>);
+    renderWithProviders(<AuthProvider><SubmitTask /></AuthProvider>, { route: "/?session=sess-history" });
     await userEvent.click(await screen.findByRole("button", { name: /chat/i }));
 
     const thread = document.querySelector(".chat-thread") as HTMLElement;
@@ -109,12 +109,12 @@ describe("SubmitTask chat layout", () => {
     await waitFor(() => expect(thread.scrollHeight - thread.scrollTop - thread.clientHeight).toBeLessThanOrEqual(0));
   });
 
-  it("seeds the thread with full container history and shows results by default", async () => {
+  it("seeds the selected session thread with historical results", async () => {
     setup();
     server.use(http.get("/v1/containers/con_1/tasks", () => HttpResponse.json({ tasks: [
       // newest-first from the API
-      { task_id: "tsk_b", status: "completed", prompt: "Second prompt", started_at: "t", ended_at: "t", tokens_in: 1, tokens_out: 2, iterations_used: 1 },
-      { task_id: "tsk_a", status: "completed", prompt: "First prompt", started_at: "t", ended_at: "t", tokens_in: 1, tokens_out: 2, iterations_used: 1 },
+      { task_id: "tsk_b", status: "completed", prompt: "Second prompt", started_at: "t", ended_at: "t", tokens_in: 1, tokens_out: 2, iterations_used: 1, session_id: "sess-history" },
+      { task_id: "tsk_a", status: "completed", prompt: "First prompt", started_at: "t", ended_at: "t", tokens_in: 1, tokens_out: 2, iterations_used: 1, session_id: "sess-history" },
     ] })));
     // Finished turns fetch their detail (result fallback) + stored events.
     server.use(http.get("/v1/containers/con_1/tasks/:tid", ({ params }) => HttpResponse.json({
@@ -129,7 +129,7 @@ describe("SubmitTask chat layout", () => {
       { seq: 4, type: "assistant_message", ts: "t", payload: { content: [{ type: "text", text: params.tid === "tsk_b" ? "The second answer" : "The first answer" }] } },
     ] })));
 
-    renderWithProviders(<AuthProvider><SubmitTask /></AuthProvider>);
+    renderWithProviders(<AuthProvider><SubmitTask /></AuthProvider>, { route: "/?session=sess-history" });
     await userEvent.click(await screen.findByRole("button", { name: /chat/i }));
 
     // Both historical prompts appear as user bubbles, oldest first.
@@ -197,10 +197,9 @@ describe("SubmitTask chat layout", () => {
     renderWithProviders(<AuthProvider><SubmitTask /></AuthProvider>);
     await userEvent.click(await screen.findByRole("button", { name: /chat/i }));
 
-    // Default ("No session"): only the session-less task is visible — the API
-    // isn't filtered client-side-only, so this also proves the "no session"
-    // view excludes tasks that DO belong to a session, not just the reverse.
-    expect(await screen.findByText("One-off, no session", { selector: ".chat-bubble" })).toBeInTheDocument();
+    // Standalone tasks must never look like a continuous conversation.
+    expect(await screen.findByText("Start a conversation")).toBeInTheDocument();
+    expect(screen.queryByText("One-off, no session", { selector: ".chat-bubble" })).not.toBeInTheDocument();
     expect(screen.queryByText("In session one", { selector: ".chat-bubble" })).not.toBeInTheDocument();
     expect(screen.queryByText("In a different session", { selector: ".chat-bubble" })).not.toBeInTheDocument();
 
@@ -213,7 +212,7 @@ describe("SubmitTask chat layout", () => {
     expect(screen.queryByText("One-off, no session", { selector: ".chat-bubble" })).not.toBeInTheDocument();
   });
 
-  it("omits session_id when 'No session' is selected (default)", async () => {
+  it("creates a session on the first chat message", async () => {
     setup();
     server.use(http.get("/v1/containers/con_1/sessions", () => HttpResponse.json({ sessions: [] })));
     let body: any = null;
@@ -228,11 +227,12 @@ describe("SubmitTask chat layout", () => {
     await userEvent.click(screen.getByRole("button", { name: /send/i }));
 
     await waitFor(() => expect(body).not.toBeNull());
-    expect(body.session_id).toBeUndefined();
+    expect(body.session_id).toMatch(/^sess_/);
   });
 });
 
 test("chat Options panel carries the effort override into the payload and badges the toggle", async () => {
+  server.use(http.get("/v1/containers/con_1/tasks/tsk_e", () => HttpResponse.json({ task_id: "tsk_e", status: "completed", prompt: "effort", result: null, error: null, tokens_in: 0, tokens_out: 0, iterations_used: 0 })));
   server.use(http.get("/v1/auth/me", () => HttpResponse.json({ id: "u", tenant_id: "t", name: "D", email: "d@x.io", role: "member", is_staff: false, must_change_password: false,
     tenant: { id: "t", name: "A", limits: { allowed_drivers: ["opencode"], default_max_iterations: 30, default_max_tokens: 200000, default_task_timeout_seconds: 1800, max_concurrent_tasks_per_container: 4 } } })));
   server.use(http.get("/v1/templates", () => HttpResponse.json({ templates: [tpl] })));

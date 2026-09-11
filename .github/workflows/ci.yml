@@ -45,7 +45,7 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
-      - name: Operations desktop and mobile browser checks
+      - name: Operations and Chat session browser checks
         run: |
           npx playwright install --with-deps chromium
           npx playwright test --config playwright.operations.config.ts

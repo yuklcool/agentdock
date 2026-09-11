@@ -309,3 +309,16 @@ curl "$AGENTDOCK_URL/v1/containers/$CONTAINER_ID/tasks" \
 ```
 
 服务凭证只能访问自身工作空间，不会冒充所查询用户；普通用户 Session 不获得其他用户容器权限。升级遇到历史重复绑定时按[迁移预检说明](../deploy/OPERATIONS.md#035-唯一绑定迁移预检)处理。
+
+
+## Console 连续对话与独立任务（0.3.6）
+
+Form 默认选择 `No session`，提交独立 Task，不携带 `session_id`。也可以明确选择已有 Session 或 `New session`，让 Form 任务延续上下文。
+
+Chat 在未选择会话时显示空对话。发送第一条消息时自动生成 `sess_…`，第一条 Task 就带上该 ID，后续消息复用。无 Session 的独立任务不再被拼成连续聊天，仍可在任务历史中查看。此行为统一适用于 api、vanilla、opencode、codex、claude-code、nanobot。
+
+`New session` 只生成待使用的 ID，清空当前 Thread，并显示“发送后创建”；第一条 Task 成功提交后，由现有 `/sessions` 聚合接口列出，不创建空会话记录。发送失败会保留草稿与 ID，便于重试。
+
+选择保存在当前容器 URL 中，例如 `/containers/con_1/submit?session=sess_…`。刷新、分享、收藏以及浏览器前进/后退都可恢复该选择；访问权限仍由后端校验。进入其他容器的普通入口时不会沿用旧容器的会话或草稿。普通 HTTP 部署也支持安全随机会话 ID。
+
+本次不改变各 Driver 的历史持久化机制，不增加会话表，也不增加会话重命名、删除或归档能力。

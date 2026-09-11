@@ -3,7 +3,7 @@ name: Publish AgentDock distribution
 on:
   workflow_dispatch:
   push:
-    branches: [main, feat/published-deployment, feat/credential-base-url, feat/admin-container-owner, feat/readable-operations, feat/remove-personal-agents, feat/single-user-container]
+    branches: [main, feat/published-deployment, feat/credential-base-url, feat/admin-container-owner, feat/readable-operations, feat/remove-personal-agents, feat/single-user-container, fix/chat-session-continuity]
     paths:
       - '.github/workflows/distribution.yml'
       - 'deploy/quickstart/**'

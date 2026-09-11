@@ -4,7 +4,7 @@ AgentDock 按用户提供独立 Nanobot 实例，使用 PostgreSQL 保存归属�
 
 ## 升级与用户隔离
 
-部署包升级：保留 `.env` 和数据卷，将 `AGENTDOCK_VERSION` 改为 `0.3.5` 后执行 `docker compose --profile images pull`、`docker compose up -d --no-build --wait`。启动流程自动执行数据库迁移。源码部署则先备份，在停止旧控制平面服务后使用新版代码执行 `alembic upgrade head`，再启动新版服务。
+部署包升级：保留 `.env` 和数据卷，将 `AGENTDOCK_VERSION` 改为 `0.3.6` 后执行 `docker compose --profile images pull`、`docker compose up -d --no-build --wait`。启动流程自动执行数据库迁移。源码部署则先备份，在停止旧控制平面服务后使用新版代码执行 `alembic upgrade head`，再启动新版服务。
 
 `0032_remove_legacy_bindings` 会删除废弃的用户绑定密钥和模板绑定表，再移除 API Key 表上对应的归属字段。工作空间密钥、容器归属、任务和数据卷保持不变。此清理不可恢复旧密钥；若需回滚旧程序，必须恢复升级前数据库备份，不能依靠 downgrade 重建已删除数据。
 

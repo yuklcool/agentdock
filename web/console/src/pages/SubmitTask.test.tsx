@@ -52,6 +52,7 @@ describe("SubmitTask", () => {
     await userEvent.type(await screen.findByLabelText(/Prompt/i), "Research pricing");
     await userEvent.click(screen.getByRole("button", { name: /Submit task/i }));
     await waitFor(() => expect(body.prompt).toBe("Research pricing"));
+    expect(body).not.toHaveProperty("session_id");
     expect(nav).toHaveBeenCalledWith("/containers/con_1/tasks/tsk_9");
   });
 
