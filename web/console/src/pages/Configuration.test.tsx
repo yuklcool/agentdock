@@ -28,8 +28,18 @@ const opencodeTpl = {
 const codexTpl = {
   ...vanillaTpl, id: "tpl_c", name: "Codex", driver: "codex",
   capabilities: { supports_tools: false, supports_structured_output: false, supports_cancel: true, requires_image_feature: null },
-  driver_template: { driver: "codex", default_system_prompt: "", available_tools: [], tools_user_editable: false, supports_context: false },
-  available_tool_specs: [],
+  driver_template: {
+    driver: "codex", default_system_prompt: "", supports_context: false, tools_user_editable: true,
+    available_tools: ["web_search", "image_generation", "view_image", "multi_agent", "goals"],
+    default_tools: ["web_search"],
+  },
+  available_tool_specs: [
+    { name: "web_search", description: "", input_schema: {}, requires_image_feature: null },
+    { name: "image_generation", description: "", input_schema: {}, requires_image_feature: null },
+    { name: "view_image", description: "", input_schema: {}, requires_image_feature: null },
+    { name: "multi_agent", description: "", input_schema: {}, requires_image_feature: null },
+    { name: "goals", description: "", input_schema: {}, requires_image_feature: null },
+  ],
 };
 
 function setup(over: Partial<any> = {}) {
@@ -85,6 +95,16 @@ describe("Configuration editor (driver-aware)", () => {
     await userEvent.type(editor, "Cite every source.");
     await waitFor(() => expect(preview).toHaveTextContent("Cite every source."));
     expect(preview).toHaveTextContent("## SYSTEM");        // augment scaffolding present
+  });
+
+  it("shows the manages-its-own-system-prompt note for codex, not the vanilla-style scaffolding preview", async () => {
+    // codex reports tools_user_editable=true but supports_context=false, so the
+    // preview must stay gated on both flags, not just tools_user_editable.
+    setup({ driver: "codex", tools: ["web_search"] });
+    renderWithProviders(<AuthProvider><Configuration /></AuthProvider>);
+    const preview = await screen.findByTestId("assembled-preview");
+    expect(preview).toHaveTextContent(/manages its own system prompt/i);
+    expect(preview).not.toHaveTextContent("## SYSTEM");
   });
 
   it("shows the assembled preview verbatim in replace mode", async () => {
@@ -176,6 +196,19 @@ describe("Configuration editor (driver-aware)", () => {
     await waitFor(() => expect(patched).not.toBeNull());
     expect(patched.driver).toBe("vanilla");
     expect(patched.effort).toBe(null);
+  });
+
+  it("resets tools to the codex driver's default when switching from vanilla to codex", async () => {
+    setup({ driver: "vanilla", tools: ["read_file"] });
+    let patched: any = null;
+    server.use(http.patch("/v1/containers/con_1/config", async ({ request }) => { patched = await request.json(); return HttpResponse.json({ config: patched, assembled_prompt: "x" }); }));
+    renderWithProviders(<AuthProvider><Configuration /></AuthProvider>);
+    await userEvent.click(await screen.findByLabelText("Driver"));
+    await userEvent.click(screen.getByRole("option", { name: "codex" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+    await waitFor(() => expect(patched).not.toBeNull());
+    expect(patched.driver).toBe("codex");
+    expect(patched.tools).toEqual(["web_search"]);
   });
 
   it("renders the env section with fetched vars", async () => {

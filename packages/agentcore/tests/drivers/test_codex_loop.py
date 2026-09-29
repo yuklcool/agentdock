@@ -312,8 +312,10 @@ def test_codex_capabilities_and_template():
     assert d.capabilities.supports_cancel is True
     assert d.capabilities.requires_image_feature is None
     assert d.default_template.driver == "codex"
-    assert d.default_template.available_tools == []
-    assert d.default_template.tools_user_editable is False
+    assert d.default_template.available_tools == [
+        "web_search", "image_generation", "view_image", "multi_agent", "goals",
+    ]
+    assert d.default_template.tools_user_editable is True
     assert d.default_template.supports_context is False
 
 
@@ -430,6 +432,76 @@ async def test_codex_no_session_id_unchanged(monkeypatch, tmp_path):
     assert result.success is True
     assert "--ephemeral" in captured_cmd["argv"]
     assert not os.path.isdir(os.path.join(str(tmp_path), ".agent-state", "codex", "sessions"))
+
+
+@pytest.mark.asyncio
+async def test_codex_run_passes_configured_tools_into_the_command(monkeypatch, tmp_path):
+    """A fresh run's config.tools reaches the spawned codex command as the
+    matching -c overrides (spec: per-task/per-config tools override)."""
+    from agentcore.drivers.codex import CodexDriver
+
+    captured_cmd = {}
+
+    async def fake_spawn(argv, *, cwd, env, **kwargs):
+        captured_cmd["argv"] = argv
+        return FakeProc(
+            ['{"type":"thread.started","thread_id":"codex-thread-tools"}',
+             '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hi"}}'],
+            returncode=0,
+        )
+
+    monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
+    monkeypatch.setattr("agentcore.sandbox.ensure_agent_dir", lambda *a, **kw: None)
+
+    driver = CodexDriver()
+    events, emit = collector()
+    config = AgentConfig(driver="codex", model="gpt-5-codex", tools=["goals"])
+    result = await driver.run(
+        task=TaskBody(prompt="hi"), config=config, limits=LIMITS,
+        credential="cred", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
+    )
+
+    assert result.success is True
+    argv = captured_cmd["argv"]
+    idx = argv.index("features.goals=true")
+    assert argv[idx - 1] == "-c"
+    assert "web_search=disabled" in argv
+
+
+@pytest.mark.asyncio
+async def test_codex_resumed_run_passes_configured_tools_into_the_command(monkeypatch, tmp_path):
+    """A resumed session's config.tools reaches the resume command the same way."""
+    from agentcore.drivers.codex import CodexDriver
+    from agentcore.drivers.session_state import write_session_state
+
+    write_session_state(str(tmp_path), "codex", "sess-tools", {"thread_id": "codex-thread-tools"})
+    captured_cmd = {}
+
+    async def fake_spawn(argv, *, cwd, env, **kwargs):
+        captured_cmd["argv"] = argv
+        return FakeProc(
+            ['{"type":"thread.started","thread_id":"codex-thread-tools"}',
+             '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"ok"}}'],
+            returncode=0,
+        )
+
+    monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
+    monkeypatch.setattr("agentcore.sandbox.ensure_agent_dir", lambda *a, **kw: None)
+
+    driver = CodexDriver()
+    events, emit = collector()
+    config = AgentConfig(driver="codex", model="gpt-5-codex", tools=["goals"])
+    result = await driver.run(
+        task=TaskBody(prompt="continue"), config=config, limits=LIMITS,
+        credential="cred", emit=emit, cancel=asyncio.Event(),
+        workspace=str(tmp_path), session_id="sess-tools", session_is_continuation=True,
+    )
+
+    assert result.success is True
+    argv = captured_cmd["argv"]
+    idx = argv.index("features.goals=true")
+    assert argv[idx - 1] == "-c"
+    assert "web_search=disabled" in argv
 
 
 @pytest.mark.asyncio

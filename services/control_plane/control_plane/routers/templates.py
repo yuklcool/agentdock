@@ -16,6 +16,7 @@ from agentcore.tools.base import TOOLS
 from control_plane.auth.crypto import load_key_from_env
 from control_plane.auth.principal import Principal, require_admin, resolve_principal
 from control_plane.config import Settings
+from control_plane.config_validation import default_tools_for
 from control_plane.env_vars import public_env_vars, store_env_vars
 from control_plane.errors import APIError, api_error, not_found, validation_error
 from control_plane.ids import new_template_id
@@ -159,12 +160,15 @@ def template_public_view(row: dict[str, Any]) -> dict[str, Any]:
 
     if driver is not None:
         capabilities = asdict(driver.capabilities)
-        driver_template = asdict(driver.default_template)
-        # Collect ToolSpec dicts for tools listed in the driver's default_template
-        for tool_name in driver.default_template.available_tools:
-            tool = TOOLS.get(tool_name)
-            if tool is not None:
-                available_tool_specs.append(asdict(tool.spec))
+        dt = driver.default_template
+        driver_template = asdict(dt)
+        if dt.tool_specs:
+            available_tool_specs = [asdict(s) for s in dt.tool_specs]
+        else:
+            for tool_name in dt.available_tools:
+                tool = TOOLS.get(tool_name)
+                if tool is not None:
+                    available_tool_specs.append(asdict(tool.spec))
 
     return {
         **row,
@@ -297,7 +301,9 @@ async def create_template(
         "effort": body.get("effort"),
         "system_prompt": body.get("system_prompt", ""),
         "system_prompt_mode": body.get("system_prompt_mode", "augment"),
-        "tools": body.get("tools", []),
+        "tools": body["tools"] if "tools" in body else (
+            default_tools_for(body.get("driver", "")) or []
+        ),
         "context": context_from_body(body.get("context")),
         "skills": body.get("skills", []),
         "mcp_servers": body.get("mcp_servers", []),
@@ -373,6 +379,23 @@ async def patch_template(
             "image_variant", "mem_limit", "cpus", "env_vars",
         }
         updates = {k: v for k, v in body.items() if k in allowed_fields}
+        if (
+            "tools" not in updates
+            and "driver" in updates
+            and updates["driver"] != row_dict["driver"]
+        ):
+            # The stored tool names belong to the OLD driver; a name like codex's
+            # "view_image" is meaningless (and may not even be validate-able) for
+            # a driver that doesn't offer it. Drop whatever the new driver doesn't
+            # recognize, then fall back to its own defaults (spec: driver switch).
+            new_driver = DRIVERS.get(updates["driver"])
+            new_available = set(
+                new_driver.default_template.available_tools if new_driver else []
+            )
+            stored_tools = row_dict.get("tools") or []
+            kept_tools = [name for name in stored_tools if name in new_available]
+            defaults = default_tools_for(updates["driver"])
+            updates["tools"] = defaults if defaults is not None else kept_tools
         if "context" in updates:
             updates["context"] = context_from_body(updates["context"])
         if "effort" in updates:
