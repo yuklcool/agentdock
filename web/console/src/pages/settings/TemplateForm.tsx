@@ -12,7 +12,7 @@ import { EnvVarsField } from "../../components/EnvVarsField";
 import { assemblePrompt } from "../assemblePrompt";
 import { driverLabel } from "../../lib/drivers";
 import { MEM_OPTIONS, CPU_OPTIONS, withCurrentValue } from "../../lib/resourceOptions";
-import { EFFORT_DRIVERS } from "../../api/types";
+import { EFFORT_DRIVERS, toolsForDriver } from "../../api/types";
 import type { TemplateDraft, TemplateSavePayload, Template, AgentConfig, ToolSpec } from "../../api/types";
 
 const EMPTY: TemplateDraft = {
@@ -80,13 +80,12 @@ export default function TemplateForm() {
   // saved template always matches the driver's capabilities.
   function changeDriver(driver: string) {
     const meta = builtins.find((t) => t.driver === driver);
-    const editableTools = meta?.driver_template.tools_user_editable ?? true;
     const supportsContext = meta?.driver_template.supports_context ?? true;
     const skillDriver = driver === "opencode" || driver === "codex";
     const supportsEffort = EFFORT_DRIVERS.includes(driver);
     setDraft((d) => (d ? {
       ...d, driver,
-      tools: editableTools ? d.tools : [],
+      tools: toolsForDriver(meta, d.tools),
       context: supportsContext ? d.context : { variables: {}, text: null, files: [] },
       skills: skillDriver ? d.skills : [],
       mcp_servers: skillDriver ? d.mcp_servers : [],
@@ -117,6 +116,7 @@ export default function TemplateForm() {
   // prompt the agent will receive updates as you build the template.
   const toolSpecs: ToolSpec[] = driverMeta?.available_tool_specs ?? [];
   const editableTools = driverMeta?.driver_template.tools_user_editable ?? true;
+  const supportsContext = driverMeta?.driver_template.supports_context ?? true;
   const isSkillDriver = draft.driver === "opencode" || draft.driver === "codex";
   const assembled = assemblePrompt(draft as unknown as AgentConfig, toolSpecs);
 
@@ -229,7 +229,7 @@ export default function TemplateForm() {
           </dl>
 
           {/* Assembled prompt */}
-          {editableTools ? (
+          {editableTools && supportsContext ? (
             <div data-testid="assembled-preview" style={{ fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.65, whiteSpace: "pre-wrap", color: "var(--ink-2)" }}>
               {userIndex >= 0 ? (
                 <>

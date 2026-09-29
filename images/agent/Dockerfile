@@ -65,7 +65,7 @@ RUN /app/.venv/bin/python -c "import sys, importlib.metadata as m; assert sys.ve
 # Best-effort per spec §3.5.2 / index §11.5: if the npm install fails at
 # build time (e.g. package not yet published), the build continues and the
 # driver handles the missing binary gracefully at runtime.
-ARG OPENCODE_VERSION=1.17.18
+ARG OPENCODE_VERSION=1.18.32
 RUN npm install -g opencode-ai@${OPENCODE_VERSION} \
     && opencode --version \
     || echo "WARNING: opencode-ai@${OPENCODE_VERSION} install failed (best-effort, driver will handle at runtime)"
@@ -76,7 +76,7 @@ RUN npm install -g opencode-ai@${OPENCODE_VERSION} \
 # the prebuilt musl release binary rather than the npm package so codex needs no
 # Node runtime at all (the binary is self-contained). Verified: the tarball
 # contains a single file `codex-<target>` which we rename to `codex`.
-ARG CODEX_VERSION=0.152.0
+ARG CODEX_VERSION=0.157.1
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \

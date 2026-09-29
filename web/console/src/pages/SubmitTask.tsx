@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useContainer, useTemplates, useSubmitTask, useTasks } from "../api/queries";
+import { useContainer, useTemplates, useSubmitTask, useTaskPages } from "../api/queries";
 import { useAuth } from "../auth/useAuth";
 import { useToast } from "../components/Toast";
 import { ApiError } from "../api/client";
@@ -57,8 +57,10 @@ function SubmitTaskPage({ cid }: { cid: string }) {
   const [timeoutS, setTimeoutS] = useState<number | null>(null);
   // Per-task effort override. null ⇒ inherit the container's configured effort (or the model's own default).
   const [effort, setEffort] = useState<Effort | null>(null);
+  // Per-task tools override. null ⇒ inherit the container's tools.
+  const [taskTools, setTaskTools] = useState<string[] | null>(null);
 
-  const tasksQ = useTasks(cid!, sessionId ?? undefined);
+  const tasksQ = useTaskPages(cid!, sessionId ?? undefined);
   const recentTask = tasksQ.data?.tasks?.[0] ?? null;
 
   // Pre-fill from the most recent task — form layout only, to keep the chat
@@ -78,6 +80,12 @@ function SubmitTaskPage({ cid }: { cid: string }) {
   const structuredSupported = driverMeta?.capabilities.supports_structured_output ?? true;
   const schema = useMemo(() => parseSchema(schemaText), [schemaText]);
   const schemaBlocksSubmit = outputType === "structured" && schemaText.trim() !== "" && !schema.ok;
+
+  // This screen stays mounted across container navigation, so a tools override picked
+  // for one container (or driver) must not leak into another's submission.
+  useEffect(() => {
+    setTaskTools(null);
+  }, [cid, config?.driver]);
 
   if (!config) return <div className="p-8 text-sm text-muted">Loading…</div>;
 
@@ -100,6 +108,7 @@ function SubmitTaskPage({ cid }: { cid: string }) {
       limits: { max_iterations: maxIter, max_tokens: maxTokens, timeout_seconds: timeoutS },
       metadata: {},
       ...(effort ? { effort } : {}),
+      ...(taskTools !== null ? { tools: taskTools } : {}),
       ...(selectedSession ? { session_id: selectedSession } : {}),
     };
   }
@@ -187,6 +196,9 @@ function SubmitTaskPage({ cid }: { cid: string }) {
               submitting={submit.isPending}
               effort={effort}
               onEffortChange={setEffort}
+              driverMeta={driverMeta}
+              taskTools={taskTools}
+              onTaskToolsChange={setTaskTools}
               {...limitProps}
             />
           </div>
@@ -196,6 +208,9 @@ function SubmitTaskPage({ cid }: { cid: string }) {
           cid={cid!}
           config={config}
           recentTasks={tasksQ.data?.tasks ?? []}
+          hasOlder={tasksQ.hasNextPage}
+          loadingOlder={tasksQ.isFetchingNextPage}
+          onLoadOlder={() => void tasksQ.fetchNextPage()}
           sessionId={sessionId}
           onSessionChange={setSessionId}
           submit={submit}
@@ -211,6 +226,9 @@ function SubmitTaskPage({ cid }: { cid: string }) {
           onError={onSubmitError}
           effort={effort}
           onEffortChange={setEffort}
+          driverMeta={driverMeta}
+          taskTools={taskTools}
+          onTaskToolsChange={setTaskTools}
           {...limitProps}
         />
       )}

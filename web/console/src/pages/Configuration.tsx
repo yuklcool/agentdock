@@ -9,7 +9,7 @@ import { Field, Tag, Note, Dropdown } from "../ui";
 import { Icons } from "../ui/Icon";
 import { ConfigFields } from "../components/ConfigFields";
 import { EnvVarsField } from "../components/EnvVarsField";
-import { EFFORT_DRIVERS } from "../api/types";
+import { EFFORT_DRIVERS, toolsForDriver } from "../api/types";
 import type { AgentConfig, EnvVar, Template, ToolSpec } from "../api/types";
 
 export default function Configuration() {
@@ -44,6 +44,7 @@ export default function Configuration() {
   const envDirty = envDraft !== null && JSON.stringify(envDraft) !== JSON.stringify(envQ.data ?? []);
   const dirty = configDirty || envDirty;
   const editableTools = driverMeta?.driver_template.tools_user_editable ?? true;
+  const supportsContext = driverMeta?.driver_template.supports_context ?? true;
   // Only the vanilla driver runs the host-managed reason→act loop; opencode,
   // codex, and claude-code drive their own control flow, so the iteration cap doesn't apply.
   const supportsMaxIterations = draft.driver === "vanilla";
@@ -148,7 +149,11 @@ export default function Configuration() {
                 <Dropdown
                   id="cfg-driver"
                   value={draft.driver}
-                  onChange={(v) => patch({ driver: v, ...(EFFORT_DRIVERS.includes(v) ? {} : { effort: null }) })}
+                  onChange={(v) => patch({
+                    driver: v,
+                    tools: toolsForDriver(builtins.find((t) => t.driver === v), draft.tools),
+                    ...(EFFORT_DRIVERS.includes(v) ? {} : { effort: null }),
+                  })}
                   options={limits.allowed_drivers.map((d) => ({ value: d, label: d }))}
                 />
               </Field>
@@ -261,7 +266,7 @@ export default function Configuration() {
           </button>
         </div>
 
-        {editableTools ? (
+        {editableTools && supportsContext ? (
           <div
             data-testid="assembled-preview"
             style={{

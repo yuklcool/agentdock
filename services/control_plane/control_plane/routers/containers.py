@@ -18,7 +18,7 @@ from agentcore.drivers.base import DRIVERS
 from agentcore.drivers.vanilla import DEFAULT_SYSTEM_PROMPT, DONE_TOOL, enabled_tool_specs
 from agentcore.models import AgentConfig, ResolvedLimits, TaskBody
 from agentcore.prompt import assemble_system_prompt
-from agentcore.tools.base import TOOLS
+from agentcore.tools.base import TOOLS, ToolSpec
 from control_plane import lifecycle
 from control_plane import tables as auth_tables
 from control_plane.access import (
@@ -36,6 +36,7 @@ from control_plane.auth.principal import require_admin, resolve_principal
 from control_plane.config import Settings
 from control_plane.config_validation import (
     ConfigInvalid,
+    fill_default_tools,
     validate_config,
     validate_config_against_tenant,
 )
@@ -208,9 +209,24 @@ async def load_tenant_limits(session: AsyncSession, tenant_id: str) -> dict[str,
     return merge_limits(dict(row))
 
 
+def _enabled_tool_specs_for_preview(cfg: AgentConfig) -> list[ToolSpec]:
+    """Enabled-tool specs for the preview, sourced from the right registry.
+
+    Drivers that own their tools (default_template.tool_specs populated, e.g.
+    codex) describe them there; a name can collide with the generic `TOOLS`
+    registry (codex's "web_search" vs. the vanilla tool of the same name), so
+    those drivers must never be resolved against TOOLS."""
+    drv = DRIVERS.get(cfg.driver)
+    owned_specs = drv.default_template.tool_specs if drv is not None else []
+    if not owned_specs:
+        return enabled_tool_specs(cfg)
+    by_name = {t.name: t for t in owned_specs}
+    return [by_name[name] for name in cfg.tools if name in by_name]
+
+
 def _preview_prompt(cfg: AgentConfig) -> str:
     """Assemble a system-prompt preview from the config (no task or live limits)."""
-    tool_specs = enabled_tool_specs(cfg)
+    tool_specs = _enabled_tool_specs_for_preview(cfg)
     tool_specs_with_done = tool_specs if DONE_TOOL in tool_specs else [*tool_specs, DONE_TOOL]
     return assemble_system_prompt(
         config=cfg,
@@ -286,7 +302,9 @@ async def _resolve_create_config(
 
     if req.config is not None:
         # Inline config: it is the complete active config (overrides template).
-        cfg: AgentConfig = req.config
+        cfg: AgentConfig = fill_default_tools(
+            req.config, tools_given="tools" in req.config.model_fields_set
+        )
     elif base is not None:
         if base["model"] is None:
             raise validation_error("template has no model; provide config.model", field="model")
@@ -721,7 +739,9 @@ async def patch_config(
     tid = _tid(principal)
     row = await _load_owned_container(session, tid, cid)
     limits = await load_tenant_limits(session, tid)
-    new_config = patch.to_agent_config()
+    new_config = fill_default_tools(
+        patch.to_agent_config(), tools_given="tools" in patch.model_fields_set
+    )
     # Drop skill ids that don't belong to this tenant so a stale/foreign id
     # can't linger in the saved config (spec: opencode skills).
     if new_config.skills:

@@ -6,9 +6,10 @@ import { newSessionId } from "../lib/sessions";
 import { appendPrompt } from "../lib/prompt";
 import { ChatTurn } from "../components/ChatTurn";
 import { EffortField } from "../components/EffortField";
+import { TaskToolsField } from "../components/TaskToolsField";
 import { OutputContractField } from "../components/OutputContractField";
 import { TaskLimitsFields } from "../components/TaskLimitsFields";
-import type { AgentConfig, Effort, OutputType, TaskStatus, TaskSummary, TenantLimits } from "../api/types";
+import type { AgentConfig, Effort, OutputType, TaskStatus, TaskSummary, Template, TenantLimits } from "../api/types";
 
 type Turn = { taskId: string; prompt: string; status: TaskStatus; sessionId: string | null };
 
@@ -19,6 +20,9 @@ export function SubmitTaskChat({
   cid,
   config,
   recentTasks,
+  hasOlder = false,
+  loadingOlder = false,
+  onLoadOlder,
   sessionId,
   onSessionChange,
   submit,
@@ -34,6 +38,9 @@ export function SubmitTaskChat({
   onError,
   effort,
   onEffortChange,
+  driverMeta,
+  taskTools,
+  onTaskToolsChange,
   // limits
   supportsMaxIterations,
   iterDefault,
@@ -50,6 +57,9 @@ export function SubmitTaskChat({
   cid: string;
   config: AgentConfig;
   recentTasks: TaskSummary[];
+  hasOlder?: boolean;
+  loadingOlder?: boolean;
+  onLoadOlder?: () => void;
   // Null is a fresh conversation, never a thread of unrelated standalone tasks.
   sessionId: string | null;
   onSessionChange: (sessionId: string) => void;
@@ -66,6 +76,9 @@ export function SubmitTaskChat({
   onError: (err: unknown) => void;
   effort: Effort | null;
   onEffortChange: (v: Effort | null) => void;
+  driverMeta: Template | undefined;
+  taskTools: string[] | null;
+  onTaskToolsChange: (v: string[] | null) => void;
   supportsMaxIterations: boolean;
   iterDefault?: number | null;
   tokensDefault?: number | null;
@@ -98,6 +111,9 @@ export function SubmitTaskChat({
   }, []);
   const active = useRef({ sessionId, prompt });
   active.current = { sessionId, prompt };
+  // Distance from the bottom captured before older turns are prepended, so the
+  // viewport stays on the same turn once they render.
+  const anchorFromBottom = useRef<number | null>(null);
 
   // Only a real session forms a conversation. Standalone tasks stay in History.
   // Show oldest→newest, then optimistic turns not yet returned by the API.
@@ -124,8 +140,26 @@ export function SubmitTaskChat({
   }
 
   // Land at the bottom on entry and whenever the turn list changes.
-  useLayoutEffect(() => { pinned.current = true; stickToBottom(); }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
-  useLayoutEffect(() => { stickToBottom(); }, [turns.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    pinned.current = true;
+    anchorFromBottom.current = null;
+    stickToBottom();
+  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    const el = threadRef.current;
+    if (el && anchorFromBottom.current != null) {
+      el.scrollTop = el.scrollHeight - anchorFromBottom.current;
+      anchorFromBottom.current = null;
+      return;
+    }
+    stickToBottom();
+  }, [turns.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function loadOlder() {
+    const el = threadRef.current;
+    if (el) anchorFromBottom.current = el.scrollHeight - el.scrollTop;
+    onLoadOlder?.();
+  }
 
   // Release the pin when the user scrolls up (so we never yank the viewport
   // while they read back through history) and re-arm it at the bottom.
@@ -170,6 +204,13 @@ export function SubmitTaskChat({
   return (
     <div className="chat-view">
       <div className="chat-thread" ref={threadRef} onScroll={onThreadScroll}>
+        {hasOlder && (
+          <div style={{ display: "flex", justifyContent: "center" }}>
+            <button type="button" className="btn btn-ghost btn-sm" disabled={loadingOlder} onClick={loadOlder}>
+              {loadingOlder ? "Loading…" : "Load older messages"}
+            </button>
+          </div>
+        )}
         {turns.length === 0 ? (
           <div className="chat-empty">
             <span className="ico"><Icons.Bot w={24} /></span>
@@ -214,6 +255,7 @@ export function SubmitTaskChat({
               setTimeoutS={setTimeoutS}
             />
             <EffortField driver={config.driver} value={effort} onChange={onEffortChange} />
+            <TaskToolsField driverMeta={driverMeta} inherited={config.tools} value={taskTools} onChange={onTaskToolsChange} />
           </div>
         )}
 
@@ -246,6 +288,7 @@ export function SubmitTaskChat({
             Options
             {outputType !== "text" && <span className="tag" style={{ fontSize: 10 }}>{outputType}</span>}
             {effort && <span className="tag" style={{ fontSize: 10 }}>effort {effort}</span>}
+            {taskTools !== null && <span className="tag" style={{ fontSize: 10 }}>tools {taskTools.length}</span>}
           </button>
           <span className="chat-hint">
             <Icons.Cube w={12} /> inherits {config.driver} · {config.model}
