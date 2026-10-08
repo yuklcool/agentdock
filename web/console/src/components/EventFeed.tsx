@@ -75,6 +75,8 @@ function EventBody({ cid, ev }: { cid: string; ev: Event }) {
       return <span className="mono">{p.line}</span>;
     case "claude_event":
       return <span className="mono">{JSON.stringify(p.raw)}</span>;
+    case "progress":
+      return <span>{p.text}</span>;
     default:
       return null;
   }

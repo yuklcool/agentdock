@@ -8,6 +8,8 @@ import { ApiError } from "../api/client";
 import { Button, SegControl, Field, Input, Note, Dropdown } from "../ui";
 import { Icons } from "../ui/Icon";
 import { EffortField } from "../components/EffortField";
+import { DRIVER_FLAG_KEYS, DriverFlagSwitch, flagSupported } from "../components/DriverFlagField";
+import type { DriverFlag } from "../components/DriverFlagField";
 import { ModelPicker } from "../components/ModelPicker";
 import { EnvVarsField } from "../components/EnvVarsField";
 import { MEM_OPTIONS, CPU_OPTIONS } from "../lib/resourceOptions";
@@ -96,6 +98,7 @@ export default function CreateContainer() {
   const [variant, setVariant] = useState<"full" | "slim">("full");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState<Effort | null>(null);
+  const [flags, setFlags] = useState<Partial<Record<DriverFlag, boolean>>>({});
   const [memLimit, setMemLimit] = useState("");
   const [cpus, setCpus] = useState("");
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
@@ -110,6 +113,7 @@ export default function CreateContainer() {
   useEffect(() => {
     setModel(chosen?.model ?? "");
     setEffort(chosen?.effort ?? null);
+    setFlags({});
     setVariant((chosen?.image_variant as "full" | "slim") ?? "full");
     setMemLimit("");
     setCpus("");
@@ -157,6 +161,7 @@ export default function CreateContainer() {
             tools: chosen.tools,
             context: chosen.context,
             effort,
+            ...Object.fromEntries(DRIVER_FLAG_KEYS.map((f) => [f, flags[f] ?? false])),
           }
         : undefined;
       // Both dropdowns default to "" (use the image-variant default) — only
@@ -317,6 +322,16 @@ export default function CreateContainer() {
                     />
                   </div>
                 )}
+                {DRIVER_FLAG_KEYS.filter((f) => flagSupported(f, chosen?.driver ?? "")).map((flag) => (
+                  <div key={flag} style={{ marginTop: 14 }}>
+                    <DriverFlagSwitch
+                      flag={flag}
+                      driver={chosen?.driver ?? ""}
+                      value={flags[flag] ?? false}
+                      onChange={(v) => setFlags((cur) => ({ ...cur, [flag]: v }))}
+                    />
+                  </div>
+                ))}
               </div>
 
               <div className="fluid-w" style={{ maxWidth: 560 }}>

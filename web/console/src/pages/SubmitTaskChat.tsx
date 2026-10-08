@@ -6,6 +6,8 @@ import { newSessionId } from "../lib/sessions";
 import { appendPrompt } from "../lib/prompt";
 import { ChatTurn } from "../components/ChatTurn";
 import { EffortField } from "../components/EffortField";
+import { DRIVER_FLAGS, DriverFlagOverrides } from "../components/DriverFlagField";
+import type { DriverFlag, FlagOverrides } from "../components/DriverFlagField";
 import { TaskToolsField } from "../components/TaskToolsField";
 import { OutputContractField } from "../components/OutputContractField";
 import { TaskLimitsFields } from "../components/TaskLimitsFields";
@@ -38,6 +40,8 @@ export function SubmitTaskChat({
   onError,
   effort,
   onEffortChange,
+  flagOverrides,
+  onFlagOverridesChange,
   driverMeta,
   taskTools,
   onTaskToolsChange,
@@ -76,6 +80,8 @@ export function SubmitTaskChat({
   onError: (err: unknown) => void;
   effort: Effort | null;
   onEffortChange: (v: Effort | null) => void;
+  flagOverrides: FlagOverrides;
+  onFlagOverridesChange: (v: FlagOverrides) => void;
   driverMeta: Template | undefined;
   taskTools: string[] | null;
   onTaskToolsChange: (v: string[] | null) => void;
@@ -255,6 +261,7 @@ export function SubmitTaskChat({
               setTimeoutS={setTimeoutS}
             />
             <EffortField driver={config.driver} value={effort} onChange={onEffortChange} />
+            <DriverFlagOverrides driver={config.driver} value={flagOverrides} onChange={onFlagOverridesChange} />
             <TaskToolsField driverMeta={driverMeta} inherited={config.tools} value={taskTools} onChange={onTaskToolsChange} />
           </div>
         )}
@@ -288,6 +295,9 @@ export function SubmitTaskChat({
             Options
             {outputType !== "text" && <span className="tag" style={{ fontSize: 10 }}>{outputType}</span>}
             {effort && <span className="tag" style={{ fontSize: 10 }}>effort {effort}</span>}
+            {(Object.entries(flagOverrides) as [DriverFlag, boolean][]).map(([flag, on]) => (
+              <span key={flag} className="tag" style={{ fontSize: 10 }}>{DRIVER_FLAGS[flag].badge} {on ? "on" : "off"}</span>
+            ))}
             {taskTools !== null && <span className="tag" style={{ fontSize: 10 }}>tools {taskTools.length}</span>}
           </button>
           <span className="chat-hint">

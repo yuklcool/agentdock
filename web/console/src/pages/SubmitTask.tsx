@@ -5,6 +5,7 @@ import { useAuth } from "../auth/useAuth";
 import { useToast } from "../components/Toast";
 import { ApiError } from "../api/client";
 import type { Effort, OutputType } from "../api/types";
+import type { FlagOverrides } from "../components/DriverFlagField";
 import { Icons } from "../ui/Icon";
 import { parseSchema } from "../components/OutputContractField";
 import { SubmitTaskForm } from "./SubmitTaskForm";
@@ -57,6 +58,8 @@ function SubmitTaskPage({ cid }: { cid: string }) {
   const [timeoutS, setTimeoutS] = useState<number | null>(null);
   // Per-task effort override. null ⇒ inherit the container's configured effort (or the model's own default).
   const [effort, setEffort] = useState<Effort | null>(null);
+  // Per-task driver flag overrides (reasoning summaries, progress updates). A missing key inherits the container's setting.
+  const [flagOverrides, setFlagOverrides] = useState<FlagOverrides>({});
   // Per-task tools override. null ⇒ inherit the container's tools.
   const [taskTools, setTaskTools] = useState<string[] | null>(null);
 
@@ -85,6 +88,7 @@ function SubmitTaskPage({ cid }: { cid: string }) {
   // for one container (or driver) must not leak into another's submission.
   useEffect(() => {
     setTaskTools(null);
+    setFlagOverrides({});
   }, [cid, config?.driver]);
 
   if (!config) return <div className="p-8 text-sm text-muted">Loading…</div>;
@@ -108,6 +112,7 @@ function SubmitTaskPage({ cid }: { cid: string }) {
       limits: { max_iterations: maxIter, max_tokens: maxTokens, timeout_seconds: timeoutS },
       metadata: {},
       ...(effort ? { effort } : {}),
+      ...flagOverrides,
       ...(taskTools !== null ? { tools: taskTools } : {}),
       ...(selectedSession ? { session_id: selectedSession } : {}),
     };
@@ -196,6 +201,8 @@ function SubmitTaskPage({ cid }: { cid: string }) {
               submitting={submit.isPending}
               effort={effort}
               onEffortChange={setEffort}
+              flagOverrides={flagOverrides}
+              onFlagOverridesChange={setFlagOverrides}
               driverMeta={driverMeta}
               taskTools={taskTools}
               onTaskToolsChange={setTaskTools}
@@ -226,6 +233,8 @@ function SubmitTaskPage({ cid }: { cid: string }) {
           onError={onSubmitError}
           effort={effort}
           onEffortChange={setEffort}
+          flagOverrides={flagOverrides}
+          onFlagOverridesChange={setFlagOverrides}
           driverMeta={driverMeta}
           taskTools={taskTools}
           onTaskToolsChange={setTaskTools}

@@ -22,7 +22,6 @@ def test_write_creates_config_toml(tmp_path):
         [
             ShimMcpServer(name="lin", url="https://m", auth_type="bearer", secret="t"),
         ],
-        "",
     )
     assert path == codex_config_path(str(tmp_path))
     toml = Path(path).read_text()
@@ -32,7 +31,7 @@ def test_write_creates_config_toml(tmp_path):
 
 
 def test_write_empty_is_noop(tmp_path):
-    assert write_codex_config(str(tmp_path), [], "") is None
+    assert write_codex_config(str(tmp_path), []) is None
     assert not Path(codex_config_path(str(tmp_path))).exists()
 
 

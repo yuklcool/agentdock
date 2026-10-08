@@ -36,6 +36,10 @@ class TaskBody(BaseModel):
     # Optional per-task override of the container's AgentConfig.effort. Folded
     # into the config snapshot by the tasks router before dispatch.
     effort: Effort | None = None
+    # Optional per-task override of the container's AgentConfig.reasoning_summary.
+    reasoning_summary: bool | None = None
+    # Optional per-task override of the container's AgentConfig.progress_updates.
+    progress_updates: bool | None = None
     # Optional per-task override of the container's AgentConfig.tools.
     tools: list[str] | None = None
 
@@ -73,6 +77,15 @@ class AgentConfig(BaseModel):
     # Reasoning effort forwarded to the driver CLI (codex: model_reasoning_effort,
     # claude-code: --effort, opencode: --variant). None ⇒ omit the flag.
     effort: Effort | None = None
+    # Ask the driver CLI to emit short summaries of the model's reasoning as
+    # events (codex: model_reasoning_summary=auto).
+    reasoning_summary: bool = False
+    # Ask the agent to narrate each step in the user's language; each update
+    # is emitted as a `progress` event (codex only).
+    progress_updates: bool = False
+    # Keep one warm codex instance ready for the next task while the container
+    # has a free task slot (codex only; other drivers ignore it).
+    hot_spare: bool = True
     # Per-container task-limit overrides. None ⇒ fall back to the tenant default;
     # when set they become this container's default (still capped at the tenant
     # ceiling) for tasks that don't request their own bound. See limits.resolve_limits.
@@ -189,6 +202,7 @@ EventType = Literal[
     "codex_event",
     "claude_stdout",
     "claude_event",
+    "progress",
     "status_change",
     "log",
 ]

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button, Tag, Textarea } from "../ui";
 import { Icons } from "../ui/Icon";
 import { EffortField } from "../components/EffortField";
+import { DRIVER_FLAG_KEYS, DRIVER_FLAGS, DriverFlagOverrides, flagSupported } from "../components/DriverFlagField";
+import type { FlagOverrides } from "../components/DriverFlagField";
 import { TaskToolsField } from "../components/TaskToolsField";
 import { OutputContractField } from "../components/OutputContractField";
 import { TaskLimitsFields } from "../components/TaskLimitsFields";
@@ -33,6 +35,8 @@ export function SubmitTaskForm({
   submitting,
   effort,
   onEffortChange,
+  flagOverrides,
+  onFlagOverridesChange,
   driverMeta,
   taskTools,
   onTaskToolsChange,
@@ -67,6 +71,8 @@ export function SubmitTaskForm({
   submitting: boolean;
   effort: Effort | null;
   onEffortChange: (v: Effort | null) => void;
+  flagOverrides: FlagOverrides;
+  onFlagOverridesChange: (v: FlagOverrides) => void;
   driverMeta: Template | undefined;
   taskTools: string[] | null;
   onTaskToolsChange: (v: string[] | null) => void;
@@ -159,6 +165,12 @@ export function SubmitTaskForm({
           <EffortField driver={config.driver} value={effort} onChange={onEffortChange} />
         </div>
 
+        {DRIVER_FLAG_KEYS.some((f) => flagSupported(f, config.driver)) && (
+          <div style={{ marginTop: 18 }}>
+            <DriverFlagOverrides driver={config.driver} value={flagOverrides} onChange={onFlagOverridesChange} />
+          </div>
+        )}
+
         {/* Tools: per-task override, same control as the chat Options panel. */}
         <div style={{ marginTop: 18 }}>
           <TaskToolsField driverMeta={driverMeta} inherited={config.tools} value={taskTools} onChange={onTaskToolsChange} />
@@ -187,6 +199,12 @@ export function SubmitTaskForm({
                 <dd className="mono">{config.effort ?? "default"}</dd>
               </>
             )}
+            {DRIVER_FLAG_KEYS.filter((f) => flagSupported(f, config.driver)).map((flag) => (
+              <Fragment key={flag}>
+                <dt>{DRIVER_FLAGS[flag].label}</dt>
+                <dd className="mono">{config[flag] ? "on" : "off"}</dd>
+              </Fragment>
+            ))}
             <dt>Tools</dt>
             <dd style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {config.tools.slice(0, 6).map((t) => (
