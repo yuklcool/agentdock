@@ -9,6 +9,29 @@
     }
   ],
   [
+    "log",
+    {
+      "data": {
+        "outcome": "miss",
+        "reason": "none"
+      },
+      "level": "info",
+      "message": "codex_spare",
+      "op": "codex_spare",
+      "outcome": "miss",
+      "reason": "none"
+    }
+  ],
+  [
+    "codex_event",
+    {
+      "raw": {
+        "thread_id": "thr_conf",
+        "type": "thread.started"
+      }
+    }
+  ],
+  [
     "codex_event",
     {
       "raw": {

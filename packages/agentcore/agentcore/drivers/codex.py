@@ -1,67 +1,66 @@
-"""Codex driver — shells out to OpenAI's ``codex`` CLI (``codex exec``).
+"""Codex driver: runs each task on OpenAI's ``codex app-server``.
 
 Near-twin of the opencode driver (spec §3.5.2 best-effort semantics): only
 ``timeout_seconds`` + cancellation bound it (NOT max_iterations / max_tokens).
-Runs ``codex exec --json`` with the prompt on stdin, forwards the JSONL events,
-and extracts the final ``agent_message`` text as the result. Self-registers into
-DRIVERS via register().
+Self-registers into DRIVERS via register().
 
-codex exec CLI (OpenAI codex):
+Each task gets its own app-server process, spoken to over JSON-RPC on stdio
+(``codex_appserver``):
 
-    codex exec --json --skip-git-repo-check --ephemeral \\
-        -C <ws> -m <model> -c features.plugins=false -c features.apps=false \\
-        -c analytics.enabled=false -c otel.exporter=none \\
-        <tool flags> \\
-        --dangerously-bypass-approvals-and-sandbox -
+    codex app-server -c features.plugins=false -c features.apps=false \\
+        -c analytics.enabled=false -c otel.exporter=none <tool flags>
 
-- ``--json`` emits one JSON event object per line on stdout;
+then ``thread/start`` (``thread/resume`` for a session continuation) and one
+``turn/start`` with the prompt. Notifications are translated back into the
+``codex exec --json`` event shape (``codex_events``), so ``codex_event``
+payloads look the same to the console and API clients.
+
 - the ``-c`` overrides (``SIDE_CHANNEL_OVERRIDES``) switch off codex's
-  ChatGPT-account plugin sync, apps (connectors), analytics and OTEL export:
-  codex runs them at startup and again at shutdown, and the driver waits for
-  process exit, so they sat on every task's critical path (0.3-7 s measured
-  after ``turn.completed``, scaling with OpenAI backend latency) and added
-  ~2.5k prompt tokens per turn. These are always off;
+  ChatGPT-account plugin sync, apps (connectors), analytics and OTEL export.
+  codex ran them at startup and shutdown on the task's critical path (0.3-7 s
+  measured after the turn) and they added ~2.5k prompt tokens per turn;
 - the agent's ``tools`` list switches codex tools (``CODEX_TOOLS``): each is
   emitted on or off explicitly so codex defaults never leak in, except
   ``web_search`` on, which leaves codex's own mode (~2.8k tokens). The
   default is ``web_search`` only; the other tools add ~1k tokens of prompt;
-- the trailing ``-`` reads the prompt from stdin (robust vs prompts starting "-");
-- ``--dangerously-bypass-approvals-and-sandbox`` auto-approves + full access —
+- threads run with ``approvalPolicy: never`` and ``sandbox: danger-full-access``,
   safe because the sandboxed container is itself the security boundary;
-- ``--ephemeral`` keeps session rollout files off disk; ``--skip-git-repo-check``
-  because workspaces are not git repos;
-- ``-C`` sets the working dir; ``-m`` selects the (bare OpenAI) model.
+- threads are always persisted (``ephemeral: false``). A task without a
+  session deletes its thread when its turn ends; structured and session
+  threads stay so they can be resumed.
 
-System prompt: written to ``$CODEX_HOME/config.toml`` as ``developer_instructions``
-(``write_codex_config``), codex's documented "additional developer instructions
-injected into the session". Measured 2026-09-01 against the alternatives: it
-costs the same tokens as AGENTS.md, is injected once per session (a stdin
-prefix is re-appended to the thread on every resumed turn), and sits above
-user-level content — AGENTS.md is user context and lost every conflict with
-the task text in the test; developer_instructions was the only channel that
-won one. Earlier driver versions wrote AGENTS.md AND prefixed stdin, doubling
-the prompt; ``remove_stale_agents_md`` clears the AGENTS.md left on persistent
-volumes by those versions.
+System prompt: sent as the thread's ``developerInstructions``, codex's
+"additional developer instructions injected into the session". Measured
+2026-09-01 against AGENTS.md and a stdin prefix: same tokens as AGENTS.md,
+injected once per session, and the only channel that won a conflict with the
+task text. ``remove_stale_agents_md`` clears the AGENTS.md older driver
+versions left on persistent volumes.
 
-Auth: ``CODEX_API_KEY`` for the api-key path (codex exec ignores OPENAI_API_KEY);
-for ``oauth_subscription`` the driver writes ``$CODEX_HOME/auth.json`` instead.
-CODEX_HOME is redirected under the writable workspace (the container $HOME is not
-writable by the running process — same constraint opencode solves with XDG).
+Auth: ``CODEX_API_KEY`` for the api-key path; for ``oauth_subscription`` the
+driver writes ``$CODEX_HOME/auth.json`` instead. CODEX_HOME is redirected under
+the writable workspace (the container $HOME is not writable by the running
+process, the same constraint opencode solves with XDG).
+
+Hot spare (``codex_spare``): while the container has a free task slot the
+driver keeps one more app-server with a thread already started, built from the
+last task's settings. A new-thread task with the same settings claims it and
+only sends its turn. Each attempt logs ``codex_spare`` with the outcome.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentcore import sandbox
+from agentcore import events, sandbox
 from agentcore.drivers.base import (
     DriverCapabilities,
     DriverTemplate,
@@ -69,11 +68,17 @@ from agentcore.drivers.base import (
     _coerce_token_pair,
     register,
 )
-from agentcore.drivers.cli_stream import classify_json_line, log_payload
+from agentcore.drivers.cli_stream import log_payload
+from agentcore.drivers.codex_appserver import (
+    AppServerError,
+    AppServerReplyError,
+    start_app_server,
+)
+from agentcore.drivers.codex_events import ExecEventTranslator
+from agentcore.drivers.codex_spare import SparePool, SpareRecipe, fingerprint
 from agentcore.drivers.mcp_config import (
     codex_mcp_env,
     render_codex_mcp_toml,
-    toml_basic_string,
 )
 from agentcore.drivers.session_state import read_session_state, write_session_state
 from agentcore.drivers.skills_md import write_skills
@@ -113,33 +118,42 @@ def codex_config_path(workspace: str) -> str:
     return str(Path(codex_home(workspace)) / "config.toml")
 
 
-def write_codex_config(
-    workspace: str, servers: list[ShimMcpServer], developer_instructions: str
-) -> str | None:
-    """Write $CODEX_HOME/config.toml fresh for this task; return its path.
+def write_codex_config(workspace: str, servers: list[ShimMcpServer]) -> str | None:
+    """Write $CODEX_HOME/config.toml with the resolved MCP server blocks.
 
-    Carries the agent's system prompt as ``developer_instructions`` (see the
-    module docstring) plus the resolved MCP server blocks. The driver owns this
-    file outright — codex's other state files are auth.json and caches — so it
-    is recreated every task (a prior task may have chowned it to the agent uid)
-    and removed when there is nothing to write, so a previous task's servers or
-    prompt can never linger. Returns None when nothing was written.
+    Written to a temp file, handed to the agent and renamed into place, so a
+    codex process starting at the same moment never sees a half-written,
+    missing or root-owned file. Removed when there are no servers, so a
+    previous task's servers never linger. Returns None when nothing was written.
     """
     path = Path(codex_config_path(workspace))
-    path.unlink(missing_ok=True)
-    parts: list[str] = []
-    if developer_instructions:
-        parts.append(
-            f"developer_instructions = {toml_basic_string(developer_instructions)}\n"
-        )
-    if servers:
-        parts.append(render_codex_mcp_toml(servers))
-    if not parts:
+    if not servers:
+        path.unlink(missing_ok=True)
         return None
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(parts))
-    os.chmod(path, 0o600)
+    tmp = path.with_suffix(".toml.tmp")
+    tmp.unlink(missing_ok=True)
+    tmp.write_text(render_codex_mcp_toml(servers))
+    os.chmod(tmp, 0o600)
+    sandbox.chown_to_agent(str(tmp))
+    os.replace(tmp, path)
     return str(path)
+
+
+WORKSPACE_INSTRUCTION_FILES: tuple[str, ...] = (
+    "AGENTS.md", "AGENTS.override.md", ".codex/config.toml",
+)
+
+
+def workspace_instructions_stamp(workspace: str) -> dict[str, str | None]:
+    """Content hash of each project file codex reads at ``thread/start``, None if missing."""
+    stamp: dict[str, str | None] = {}
+    for name in WORKSPACE_INSTRUCTION_FILES:
+        try:
+            stamp[name] = hashlib.sha256((Path(workspace) / name).read_bytes()).hexdigest()
+        except OSError:
+            stamp[name] = None
+    return stamp
 
 
 def skills_dir(workspace: str) -> str:
@@ -162,18 +176,49 @@ def remove_stale_agents_md(workspace: str) -> None:
     (Path(codex_home(workspace)) / "AGENTS.md").unlink(missing_ok=True)
 
 
-def write_output_schema(workspace: str, schema: dict[str, Any]) -> str:
-    """Materialize the task's JSON schema for codex's ``--output-schema``.
+PROGRESS_INSTRUCTIONS = """\
+## Progress updates
+The user cannot see your tool calls. Every message you send is a JSON object \
+{"progress": ..., "result": ...}.
+- Your first message is always a progress update, sent right away before any \
+other work, even when you can answer without tools.
+- Before each further step (reading files, running commands, searching), send \
+another progress update.
+- A progress update is \
+{"progress": "<one short sentence saying what you are doing>", "result": null}, \
+written in the same language as the user's message.
+- Send your answer once, as your final message: {"progress": null, "result": <answer>}."""
 
-    Recreates rather than rewrites in place (a prior task may have chowned it
-    to the agent uid; same pattern as write_codex_config). The caller chowns
-    it to the agent so the dropped codex process can read it.
-    """
-    path = Path(codex_home(workspace)) / "output-schema.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.unlink(missing_ok=True)
-    path.write_text(json.dumps(schema))
-    return str(path)
+
+def developer_instructions(system_prompt: str, *, progress_updates: bool) -> str:
+    """The agent's system prompt plus, when enabled, the progress rules."""
+    if not progress_updates:
+        return system_prompt
+    return f"{system_prompt}\n\n{PROGRESS_INSTRUCTIONS}" if system_prompt else PROGRESS_INSTRUCTIONS
+
+
+def progress_envelope_schema(schema: dict[str, Any] | None) -> dict[str, Any]:
+    """Wrap the task's answer shape (``None`` for plain text) so a message is
+    either a progress update or the final answer, never both kinds of text."""
+    result = {"anyOf": [schema, {"type": "null"}]} if schema else {"type": ["string", "null"]}
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["progress", "result"],
+        "properties": {"progress": {"type": ["string", "null"]}, "result": result},
+    }
+
+
+def split_envelope(text: str) -> tuple[str | None, Any] | None:
+    """``(progress, result)`` from an envelope message, or None for any other text."""
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(value, dict) or set(value) != {"progress", "result"}:
+        return None
+    progress = value["progress"]
+    return (progress if isinstance(progress, str) and progress else None), value["result"]
 
 
 # codex config overrides applied to every invocation — see the module docstring.
@@ -229,64 +274,65 @@ def tool_args(tools: Iterable[str]) -> list[str]:
     return out
 
 
-def build_command(
+def build_app_server_command(*, tools: Iterable[str] = CODEX_DEFAULT_TOOLS) -> list[str]:
+    """``codex app-server`` with the side-channel and tool overrides.
+
+    Thread and turn settings travel in the JSON-RPC requests instead."""
+    return ["codex", "app-server", *_side_channel_args(), *tool_args(tools)]
+
+
+_THREAD_ACCESS = {"approvalPolicy": "never", "sandbox": "danger-full-access"}
+
+
+def thread_start_params(*, workspace: str, model: str, instructions: str) -> dict[str, Any]:
+    params: dict[str, Any] = {"model": model, "cwd": workspace, "ephemeral": False,
+                              **_THREAD_ACCESS}
+    if instructions:
+        params["developerInstructions"] = instructions
+    return params
+
+
+def thread_resume_params(
+    *, thread_id: str, workspace: str, model: str, instructions: str
+) -> dict[str, Any]:
+    params: dict[str, Any] = {"threadId": thread_id, "model": model, "cwd": workspace,
+                              **_THREAD_ACCESS}
+    if instructions:
+        params["developerInstructions"] = instructions
+    return params
+
+
+def turn_start_params(
     *,
-    workspace: str,
-    model: str,
-    ephemeral: bool = True,
-    effort: str | None = None,
-    output_schema_path: str | None = None,
-    tools: Iterable[str] = CODEX_DEFAULT_TOOLS,
-) -> list[str]:
-    """Build the ``codex exec`` invocation (prompt is fed on stdin via ``-``).
-
-    ``ephemeral=False`` drops ``--ephemeral`` so the rollout file persists,
-    used for the first turn of a session (driver-sessions spec §4).
-    ``effort`` maps to codex's ``model_reasoning_effort`` config override.
-    ``output_schema_path`` (structured output, task 4) appends codex's native
-    ``--output-schema`` flag when the task's schema is native-subset compatible.
-    ``tools`` lists the enabled codex tools (see ``CODEX_TOOLS``).
-    """
-    cmd = ["codex", "exec", "--json", "--skip-git-repo-check"]
-    if ephemeral:
-        cmd.append("--ephemeral")
-    cmd += ["-C", workspace, "-m", model]
-    cmd += _side_channel_args()
-    cmd += tool_args(tools)
-    if effort:
-        cmd += ["-c", f"model_reasoning_effort={effort}"]
-    if output_schema_path:
-        cmd += ["--output-schema", output_schema_path]
-    cmd += ["--dangerously-bypass-approvals-and-sandbox", "-"]
-    return cmd
-
-
-def build_resume_command(
-    *,
-    model: str,
     thread_id: str,
-    effort: str | None = None,
-    output_schema_path: str | None = None,
-    tools: Iterable[str] = CODEX_DEFAULT_TOOLS,
-) -> list[str]:
-    """Build ``codex exec resume`` (continuing a prior session).
-
-    Verified live against the installed codex CLI: the ``resume`` subcommand
-    has no ``-C``/``--ephemeral`` flags — the resumed session's original
-    working directory and on-disk persistence are implicit. The subprocess's
-    own ``cwd=`` (set by the caller) still controls the actual process cwd.
-    ``output_schema_path`` — see ``build_command``.
-    ``tools`` lists the enabled codex tools (see ``CODEX_TOOLS``).
-    """
-    cmd = ["codex", "exec", "resume", "--json", "--skip-git-repo-check", "-m", model]
-    cmd += _side_channel_args()
-    cmd += tool_args(tools)
+    prompt: str,
+    effort: str | None,
+    reasoning_summary: bool,
+    output_schema: dict[str, Any] | None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {"threadId": thread_id,
+                              "input": [{"type": "text", "text": prompt}]}
     if effort:
-        cmd += ["-c", f"model_reasoning_effort={effort}"]
-    if output_schema_path:
-        cmd += ["--output-schema", output_schema_path]
-    cmd += ["--dangerously-bypass-approvals-and-sandbox", thread_id, "-"]
-    return cmd
+        params["effort"] = effort
+    if reasoning_summary:
+        params["summary"] = "auto"
+    if output_schema is not None:
+        params["outputSchema"] = output_schema
+    return params
+
+
+def native_output_schema(
+    schema: dict[str, Any] | None, *, progress_updates: bool
+) -> dict[str, Any] | None:
+    """The schema codex enforces for the turn, or None.
+
+    Progress updates wrap the answer in the envelope. A schema outside codex's
+    strict subset is left to the shared validate-and-retry loop."""
+    if progress_updates:
+        schema = progress_envelope_schema(schema)
+    if schema is not None and native_subset_compatible(schema):
+        return schema
+    return None
 
 
 def build_env(
@@ -348,15 +394,6 @@ def write_auth_json(
     return str(path)
 
 
-def parse_codex_line(line: str) -> tuple[str, object | None]:
-    """Classify one line of codex --json output.
-
-    Returns ('event', dict) for JSON lines, ('stdout', str) for plain text,
-    ('ignore', None) for blank lines.
-    """
-    return classify_json_line(line)
-
-
 def event_text(event: dict[str, object]) -> str | None:
     """Return the assistant text from an ``item.completed`` agent_message, else None."""
     if event.get("type") != "item.completed":
@@ -407,10 +444,105 @@ def event_thread_id(event: dict[str, object]) -> str | None:
     return tid if isinstance(tid, str) and tid else None
 
 
+THREAD_REQUEST_TIMEOUT_SECONDS = 60.0
+
+
+@dataclass
+class _TurnState:
+    final: Any = None
+    error_msg: str | None = None
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+
+async def _handle_exec_event(
+    value: dict[str, Any],
+    *,
+    state: _TurnState,
+    emit: EmitFn,
+    progress_updates: bool,
+    latest_thread_id: dict[str, str | None],
+) -> None:
+    """Forward one exec-shaped event and fold it into the turn state."""
+    await emit("codex_event", {"raw": value})
+    tid = event_thread_id(value)
+    if tid:
+        latest_thread_id["id"] = tid
+    text = event_text(value)
+    envelope = split_envelope(text) if text is not None and progress_updates else None
+    if envelope is not None:
+        progress, answer = envelope
+        if progress:
+            await emit("progress", events.progress(progress))
+        if answer is not None:
+            state.final = answer
+    elif text is not None:
+        state.final = text
+    err = event_error(value)
+    if err is not None:
+        state.error_msg = err
+    usage = event_usage(value)
+    if usage is not None:
+        state.tokens_in += usage[0]
+        state.tokens_out += usage[1]
+        await emit("token_update", {"tokens_in": state.tokens_in, "tokens_out": state.tokens_out})
+
+
 _CODEX_PROMPT = (
     "You are an autonomous coding agent (codex). Complete the task in the "
     "workspace and report concisely when finished."
 )
+
+
+async def _start_app_server(cmd: list[str], *, cwd: str, env: dict[str, str]) -> Any:
+    return await start_app_server(cmd, cwd=cwd, env=env)
+
+
+class _SetupStopped(Exception):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+async def _within_budget[T](
+    step: Coroutine[Any, Any, T], *, cancel: asyncio.Event, deadline: float
+) -> T:
+    """Await one setup step, raising _SetupStopped if cancel or the deadline comes first.
+
+    A stopped step is cancelled, so the step itself cleans up what it started."""
+    if cancel.is_set() or time.monotonic() >= deadline:
+        step.close()
+        raise _SetupStopped("cancelled" if cancel.is_set() else "timeout")
+    task = asyncio.ensure_future(step)
+    cancelled = asyncio.ensure_future(cancel.wait())
+    try:
+        await asyncio.wait({task, cancelled}, timeout=deadline - time.monotonic(),
+                           return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        cancelled.cancel()
+        if not task.done():
+            task.cancel()
+    if not task.done():
+        await asyncio.gather(task, return_exceptions=True)
+        raise _SetupStopped("cancelled" if cancel.is_set() else "timeout")
+    return task.result()
+
+
+async def _end_early(emit: EmitFn, reason: str) -> TaskResult:
+    """Terminal events for a task stopped by cancel (``cancelled``) or its time budget."""
+    if reason == "cancelled":
+        await emit(
+            "status_change",
+            {"from": "running", "to": "cancelled", "result": None, "error": None},
+        )
+        return TaskResult(success=False, reason="cancelled")
+    await emit("log", {"level": "warn", "message": "wall-clock timeout", "data": {}})
+    await emit(
+        "status_change",
+        {"from": "running", "to": "timed_out", "result": None,
+         "error": {"code": "timeout", "message": "wall-clock timeout"}},
+    )
+    return TaskResult(success=False, reason="timeout")
 
 
 class CodexDriver:
@@ -437,6 +569,30 @@ class CodexDriver:
             for t in CODEX_TOOLS
         ],
     )
+
+    def __init__(self) -> None:
+        self._spares = SparePool(_start_app_server)
+
+    def set_capacity_check(self, check: Callable[[], bool]) -> None:
+        """The shim's "is there a free task slot" check; spares are only built when it says yes."""
+        self._spares.set_capacity_check(check)
+
+    def refill_spare(self) -> None:
+        self._spares.refill()
+
+    async def close_spare(self) -> None:
+        await self._spares.close()
+
+    async def _start_thread(self, recipe: SpareRecipe) -> tuple[Any, str]:
+        client = await start_app_server(recipe.cmd, cwd=recipe.cwd, env=recipe.env)
+        try:
+            started = await client.request(
+                "thread/start", recipe.thread_params, timeout=THREAD_REQUEST_TIMEOUT_SECONDS
+            )
+            return client, started["thread"]["id"]
+        except BaseException:
+            client.abort()
+            raise
 
     async def run(
         self,
@@ -485,6 +641,7 @@ class CodexDriver:
                 mcp_servers=mcp_servers, session_id=session_id,
                 resume_thread_id=resume_thread_id, latest_thread_id=latest_thread_id,
                 env=env, prompt=task.prompt, structured=False, emit_running=True,
+                delete_thread=session_id is None,
             )
         else:
             async def attempt(
@@ -502,7 +659,7 @@ class CodexDriver:
                     skills=skills, mcp_servers=mcp_servers, session_id=session_id,
                     resume_thread_id=resume_id, latest_thread_id=latest_thread_id,
                     env=env, prompt=prompt, structured=True,
-                    emit_running=emit_running,
+                    emit_running=emit_running, delete_thread=False,
                 )
 
             result = await run_structured_attempts(
@@ -537,7 +694,9 @@ class CodexDriver:
         prompt: str,
         structured: bool = False,
         emit_running: bool = True,
+        delete_thread: bool = False,
     ) -> TaskResult:
+        start = time.monotonic()
         Path(workspace).mkdir(parents=True, exist_ok=True)
 
         if emit_running:
@@ -548,40 +707,10 @@ class CodexDriver:
 
         home = codex_home(workspace)
         sandbox.ensure_agent_dir(home)
-
-        # Native --output-schema (task 4): materialize the task's JSON schema
-        # when it fits the native strict subset. Best-effort, like skills —
-        # a failure must not change the task outcome, only drop the native flag
-        # (the shared validate-and-retry loop still enforces the schema).
-        output_schema_file: str | None = None
-        if (
-            structured
-            and task.output.json_schema is not None
-            and native_subset_compatible(task.output.json_schema)
-        ):
-            try:
-                output_schema_file = write_output_schema(
-                    workspace, task.output.json_schema
-                )
-                sandbox.chown_to_agent(output_schema_file)
-            except Exception as exc:  # noqa: BLE001 — native flag is best-effort
-                output_schema_file = None
-                await emit("log", {"level": "warn", "message": "output_schema_error",
-                                   "data": {"error": str(exc)}})
-
-        if resume_thread_id:
-            cmd = build_resume_command(
-                model=model_arg(config.model), thread_id=resume_thread_id,
-                effort=config.effort, output_schema_path=output_schema_file,
-                tools=config.tools,
-            )
-        else:
-            cmd = build_command(
-                workspace=workspace, model=model_arg(config.model),
-                ephemeral=session_id is None and not structured,
-                effort=config.effort, output_schema_path=output_schema_file,
-                tools=config.tools,
-            )
+        output_schema = native_output_schema(
+            task.output.json_schema if structured else None,
+            progress_updates=config.progress_updates,
+        )
         child_env = build_env(
             sandbox.build_child_env(env),
             credential=credential,
@@ -638,165 +767,230 @@ class CodexDriver:
             )
             sandbox.chown_to_agent(auth_path)
 
-        # config.toml: system prompt as developer_instructions + MCP servers
-        # (best-effort, like skills, but surfaced as a warn so a dropped prompt
-        # is never silent). MCP secrets ride env vars codex reads at startup.
+        # config.toml: MCP servers (best-effort, surfaced as a warn). MCP secrets
+        # ride env vars codex reads at startup.
         try:
-            cfg_path = write_codex_config(
-                workspace, mcp_servers or [], config.system_prompt or ""
-            )
-            if cfg_path:
-                sandbox.chown_to_agent(cfg_path)
+            write_codex_config(workspace, mcp_servers or [])
             if mcp_servers:
                 child_env.update(codex_mcp_env(mcp_servers))
                 await emit(
                     "log", log_payload("mcp_materialized", data={"count": len(mcp_servers)})
                 )
-        except Exception as exc:  # noqa: BLE001 — config is best-effort
+        except Exception as exc:  # noqa: BLE001 - config is best-effort
             await emit(
                 "log",
-                log_payload(
-                    "mcp_error",
-                    level="warn",
-                    message=str(exc),
-                    data={"error": str(exc)},
-                ),
+                log_payload("mcp_error", level="warn", message=str(exc),
+                            data={"error": str(exc)}),
             )
 
-        try:
-            proc = await sandbox.spawn_untrusted(
-                cmd,
-                cwd=workspace,
-                env=child_env,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+        model = model_arg(config.model)
+        instructions = developer_instructions(
+            config.system_prompt or "", progress_updates=config.progress_updates
+        )
+        cmd = build_app_server_command(tools=config.tools)
+        start_params = thread_start_params(workspace=workspace, model=model,
+                                           instructions=instructions)
+        recipe = SpareRecipe(
+            cmd=cmd, cwd=workspace, env=child_env, thread_params=start_params,
+            fingerprint=fingerprint(
+                cmd, workspace, child_env, start_params, credential_kind, credential,
+                credential_meta or {}, [s.model_dump() for s in skills or []],
+                [m.model_dump() for m in mcp_servers or []],
+                workspace_instructions_stamp(workspace),
+            ),
+        )
+        self._spares.remember(recipe if config.hot_spare else None)
+
+        def turn_params(tid: str) -> dict[str, Any]:
+            return turn_start_params(thread_id=tid, prompt=prompt, effort=config.effort,
+                                     reasoning_summary=config.reasoning_summary,
+                                     output_schema=output_schema)
+
+        async def note_spare(outcome: str, reason: str | None = None) -> None:
+            data = {"outcome": outcome} if reason is None else {"outcome": outcome,
+                                                                "reason": reason}
+            await emit("log", log_payload("codex_spare", data=data))
+
+        def bounded[T](step: Coroutine[Any, Any, T]) -> Coroutine[Any, Any, T]:
+            return _within_budget(step, cancel=cancel,
+                                  deadline=start + limits.timeout_seconds)
+
+        async def thread_started(tid: str) -> None:
+            await _handle_exec_event(
+                translator.thread_started(tid), state=state, emit=emit,
+                progress_updates=config.progress_updates, latest_thread_id=latest_thread_id,
             )
+
+        translator = ExecEventTranslator()
+        state = _TurnState()
+        client: Any = None
+        try:
+            if resume_thread_id:
+                await note_spare("miss", "resume")
+                client = await bounded(start_app_server(cmd, cwd=workspace, env=child_env))
+                await bounded(client.request(
+                    "thread/resume",
+                    thread_resume_params(thread_id=resume_thread_id, workspace=workspace,
+                                         model=model, instructions=instructions),
+                    timeout=THREAD_REQUEST_TIMEOUT_SECONDS,
+                ))
+                thread_id = resume_thread_id
+                await thread_started(thread_id)
+                await bounded(client.request("turn/start", turn_params(thread_id),
+                                             timeout=THREAD_REQUEST_TIMEOUT_SECONDS))
+            else:
+                if config.hot_spare:
+                    spare, reason = await bounded(self._spares.claim(recipe.fingerprint))
+                else:
+                    spare, reason = None, "disabled"
+                if spare is not None:
+                    client, thread_id = spare.client, spare.thread_id
+                    await note_spare("hit")
+                else:
+                    await note_spare("miss", reason)
+                    client, thread_id = await bounded(self._start_thread(recipe))
+                await thread_started(thread_id)
+                try:
+                    await bounded(client.request("turn/start", turn_params(thread_id),
+                                                 timeout=THREAD_REQUEST_TIMEOUT_SECONDS))
+                except AppServerError as exc:
+                    if spare is None or isinstance(exc, AppServerReplyError):
+                        raise
+                    # The spare died after warming: start this attempt cold, once.
+                    client.abort()
+                    client = None
+                    await note_spare("miss", "dead")
+                    client, thread_id = await bounded(self._start_thread(recipe))
+                    await thread_started(thread_id)
+                    await bounded(client.request("turn/start", turn_params(thread_id),
+                                                 timeout=THREAD_REQUEST_TIMEOUT_SECONDS))
+                self._spares.refill()
+        except _SetupStopped as stopped:
+            if client is not None:
+                client.abort()
+            return await _end_early(emit, stopped.reason)
         except FileNotFoundError:
             await emit(
                 "status_change",
-                {
-                    "from": "running",
-                    "to": "failed",
-                    "result": None,
-                    "error": {"code": "codex_unavailable", "message": "codex binary not found"},
-                },
+                {"from": "running", "to": "failed", "result": None,
+                 "error": {"code": "codex_unavailable", "message": "codex binary not found"}},
             )
             return TaskResult(success=False, reason="codex_unavailable")
-
-        start = time.monotonic()
-        last_text: str | None = None
-        error_msg: str | None = None
-        tokens_in = 0
-        tokens_out = 0
-        try:
-            # Feed the prompt on stdin, then close so codex can start.
-            if proc.stdin is not None:
-                proc.stdin.write(prompt.encode("utf-8"))
-                await proc.stdin.drain()
-                proc.stdin.close()
-
-            assert proc.stdout is not None
-            while True:
-                if cancel.is_set():
-                    sandbox.terminate(proc)
-                    await emit(
-                        "status_change",
-                        {"from": "running", "to": "cancelled", "result": None, "error": None},
-                    )
-                    return TaskResult(success=False, reason="cancelled")
-
-                if time.monotonic() - start >= limits.timeout_seconds:
-                    sandbox.terminate(proc)
-                    await emit(
-                        "log", {"level": "warn", "message": "wall-clock timeout", "data": {}}
-                    )
-                    await emit(
-                        "status_change",
-                        {
-                            "from": "running",
-                            "to": "timed_out",
-                            "result": None,
-                            "error": {"code": "timeout", "message": "wall-clock timeout"},
-                        },
-                    )
-                    return TaskResult(success=False, reason="timeout")
-
-                try:
-                    raw = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
-                except TimeoutError:
-                    if proc.returncode is not None:
-                        break
-                    continue
-
-                if not raw:
-                    break
-
-                line = raw.decode("utf-8", "replace").rstrip("\n")
-                kind, value = parse_codex_line(line)
-                if kind == "event":
-                    assert isinstance(value, dict)
-                    await emit("codex_event", {"raw": value})
-                    tid = event_thread_id(value)
-                    if tid:
-                        latest_thread_id["id"] = tid
-                    text = event_text(value)
-                    if text is not None:
-                        last_text = text
-                    err = event_error(value)
-                    if err is not None:
-                        error_msg = err
-                    usage = event_usage(value)
-                    if usage is not None:
-                        tokens_in += usage[0]
-                        tokens_out += usage[1]
-                        await emit(
-                            "token_update",
-                            {"tokens_in": tokens_in, "tokens_out": tokens_out},
-                        )
-                elif kind == "stdout":
-                    assert isinstance(value, str)
-                    await emit("codex_stdout", {"line": value})
-
-            rc = await asyncio.wait_for(proc.wait(), timeout=10)
-        except Exception as exc:  # defensive: also catches a startup BrokenPipeError
-            sandbox.terminate(proc)
+        except (AppServerError, KeyError, TypeError) as exc:
+            if client is not None:
+                await client.close(timeout=1.0)
             await emit(
                 "status_change",
-                {
-                    "from": "running",
-                    "to": "failed",
-                    "result": None,
-                    "error": {"code": "codex_error", "message": str(exc)},
-                },
+                {"from": "running", "to": "failed", "result": None,
+                 "error": {"code": "codex_error", "message": str(exc)}},
             )
             return TaskResult(success=False, reason="codex_error")
+        except BaseException:
+            if client is not None:
+                client.abort()
+            raise
 
-        if rc == 0:
-            if structured:
-                # run()'s structured loop validates and emits the terminal event.
-                return TaskResult(success=True, output=last_text or "")
-            result = {"success": True, "output": last_text or ""}
+        return await self._drive_turn(
+            client, thread_id=thread_id, translator=translator, state=state, emit=emit,
+            cancel=cancel, start=start, limits=limits, progress_updates=config.progress_updates,
+            latest_thread_id=latest_thread_id, structured=structured,
+            delete_thread=delete_thread,
+        )
+
+    async def _drive_turn(
+        self,
+        client: Any,
+        *,
+        thread_id: str,
+        translator: ExecEventTranslator,
+        state: _TurnState,
+        emit: EmitFn,
+        cancel: asyncio.Event,
+        start: float,
+        limits: ResolvedLimits,
+        progress_updates: bool,
+        latest_thread_id: dict[str, str | None],
+        structured: bool,
+        delete_thread: bool,
+    ) -> TaskResult:
+        """Stream one started turn to its end and map the outcome to a TaskResult.
+
+        ``start`` is when the attempt began; its time budget counts from there."""
+        status: str | None = None
+        returncode: int | None = None
+        try:
+            while True:
+                if cancel.is_set():
+                    client.terminate()
+                    return await _end_early(emit, "cancelled")
+                if time.monotonic() - start >= limits.timeout_seconds:
+                    client.terminate()
+                    return await _end_early(emit, "timeout")
+
+                message = await client.next_message(timeout=1.0)
+                if message is None:
+                    continue
+                method = message.get("method")
+                params = message.get("params") or {}
+                if method == "_stderr":
+                    await emit("codex_stdout", {"line": params.get("line", "")})
+                    continue
+                if method == "_declined":
+                    await emit("log", log_payload(
+                        "codex_client_request_declined", level="warn",
+                        data={"request": params.get("request")}))
+                    continue
+                if method == "_exit":
+                    returncode = params.get("returncode")
+                    break
+                for value in translator.translate(message):
+                    await _handle_exec_event(
+                        value, state=state, emit=emit, progress_updates=progress_updates,
+                        latest_thread_id=latest_thread_id,
+                    )
+                if method == "turn/completed":
+                    status = (params.get("turn") or {}).get("status")
+                    break
+
+            if delete_thread and status is not None:
+                try:
+                    await client.request("thread/delete", {"threadId": thread_id}, timeout=5.0)
+                except AppServerError:
+                    pass
+        except Exception as exc:  # noqa: BLE001 - surface any stream failure as codex_error
+            client.terminate()
             await emit(
                 "status_change",
-                {"from": "running", "to": "completed", "result": result, "error": None},
+                {"from": "running", "to": "failed", "result": None,
+                 "error": {"code": "codex_error", "message": str(exc)}},
             )
-            return TaskResult(success=True, output=last_text or "")
+            return TaskResult(success=False, reason="codex_error")
+        finally:
+            await client.close()
 
-        message = error_msg or f"codex exited {rc}"
+        if status == "completed":
+            output = state.final if state.final is not None else ""
+            if structured:
+                return TaskResult(success=True, output=output)
+            await emit(
+                "status_change",
+                {"from": "running", "to": "completed",
+                 "result": {"success": True, "output": output}, "error": None},
+            )
+            return TaskResult(success=True, output=output)
+
+        if status is not None:
+            message_text = state.error_msg or f"codex turn {status}"
+            code = "codex_error"
+        else:
+            message_text = state.error_msg or f"codex exited {returncode}"
+            code = "codex_error" if state.error_msg else "codex_nonzero_exit"
         await emit(
             "status_change",
-            {
-                "from": "running",
-                "to": "failed",
-                "result": None,
-                "error": {
-                    "code": "codex_error" if error_msg else "codex_nonzero_exit",
-                    "message": message,
-                },
-            },
+            {"from": "running", "to": "failed", "result": None,
+             "error": {"code": code, "message": message_text}},
         )
-        return TaskResult(success=False, reason=message)
+        return TaskResult(success=False, reason=message_text)
 
 
 register(CodexDriver())

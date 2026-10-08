@@ -28,6 +28,18 @@ _LEGAL_PROMPT_MODES = {"augment", "replace"}
 # (AgentConfig.effort). vanilla calls the raw API and has no effort flag.
 EFFORT_DRIVERS = {"opencode", "claude-code", "codex"}
 
+# Drivers that can emit reasoning summaries (AgentConfig.reasoning_summary).
+REASONING_SUMMARY_DRIVERS = {"codex"}
+
+# Drivers that can narrate progress as `progress` events (AgentConfig.progress_updates).
+PROGRESS_UPDATES_DRIVERS = {"codex"}
+
+# Boolean AgentConfig flags that only some drivers can turn on.
+DRIVER_FLAGS = {
+    "reasoning_summary": REASONING_SUMMARY_DRIVERS,
+    "progress_updates": PROGRESS_UPDATES_DRIVERS,
+}
+
 
 def default_tools_for(driver: str) -> list[str] | None:
     """Tools a config for ``driver`` gets when the request leaves them out."""
@@ -91,6 +103,11 @@ def validate_config(config: AgentConfig, tenant_limits: dict[str, Any]) -> None:
         raise validation_error(
             f"driver '{config.driver}' does not support effort", field="effort"
         )
+    for flag, drivers in DRIVER_FLAGS.items():
+        if getattr(config, flag) and config.driver not in drivers:
+            raise validation_error(
+                f"driver '{config.driver}' does not support {flag}", field=flag
+            )
 
     # 4. Prompt mode legal.
     if config.system_prompt_mode not in _LEGAL_PROMPT_MODES:

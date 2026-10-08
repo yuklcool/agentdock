@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import tarfile
@@ -31,7 +32,10 @@ from shim.transfer import (
 
 _ARCHIVE_CHUNK_SIZE_BYTES = 64 * 1024
 _TASK_HISTORY_LIMIT = 100
+_CLOSE_SPARE_TIMEOUT_SECONDS = 5.0
 _DEFAULT_GIT_LOG_LIMIT = 200
+
+logger = logging.getLogger(__name__)
 
 
 class _ZipSink:
@@ -124,6 +128,7 @@ def create_app(
             for task in pending:
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
+        await _close_spares()
         nanobot_driver = registry.get("nanobot")
         if nanobot_driver is not None and hasattr(nanobot_driver, "close"):
             await nanobot_driver.close()
@@ -138,6 +143,35 @@ def create_app(
     subscribers: dict[str, list[asyncio.Queue[Any]]] = {}
     bg_tasks: set[asyncio.Task[None]] = set()
     git = GitOps(workspace)
+
+    def _active_count() -> int:
+        return len([r for r in runners.values() if r.status == "running"])
+
+    for driver in registry.values():
+        set_check = getattr(driver, "set_capacity_check", None)
+        if set_check is not None:
+            set_check(lambda: _active_count() < max_worker_limit)
+
+    async def _close_spares() -> None:
+        for name, driver in registry.items():
+            close_spare = getattr(driver, "close_spare", None)
+            if close_spare is None:
+                continue
+            try:
+                await asyncio.wait_for(close_spare(), _CLOSE_SPARE_TIMEOUT_SECONDS)
+            except Exception:  # noqa: BLE001 - shutdown must always complete
+                logger.warning("closing spare failed for driver %s", name,
+                               exc_info=True)
+
+    def _refill_spare(driver_name: str) -> None:
+        refill = getattr(registry.get(driver_name), "refill_spare", None)
+        if refill is None:
+            return
+        try:
+            refill()
+        except Exception:  # noqa: BLE001 - a spare is an optimisation only
+            logger.warning("spare refill failed for driver %s", driver_name,
+                           exc_info=True)
 
     async def _post_task_git(runner: TaskRunner) -> None:
         """Auto-commit (and auto-push) after every terminal task.
@@ -193,8 +227,7 @@ def create_app(
 
     @app.get("/readyz")
     async def readyz() -> dict[str, Any]:
-        return {"ready": True, "active": len([r for r in runners.values()
-                                              if r.status == "running"])}
+        return {"ready": True, "active": _active_count()}
 
     @app.post("/tasks", response_model=None)
     async def post_task(
@@ -208,7 +241,7 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=exc.errors()) from exc
-        active = len([r for r in runners.values() if r.status == "running"])
+        active = _active_count()
         if active >= max_worker_limit:
             return JSONResponse(
                 status_code=429,
@@ -233,7 +266,10 @@ def create_app(
                         await git.ensure_repo()
                 except Exception:  # noqa: BLE001
                     pass
-                await runner.run()
+                try:
+                    await runner.run()
+                finally:
+                    _refill_spare(shim_req.config.driver)
                 await _post_task_git(runner)
             finally:
                 for q in list(subscribers.get(shim_req.task_id, [])):
@@ -334,6 +370,7 @@ def create_app(
         for r in runners.values():
             if r.status == "running":
                 r.request_cancel()
+        await _close_spares()
         return {"shutting_down": True}
 
     # ---- File-management endpoints (proxied by the control plane) -----------

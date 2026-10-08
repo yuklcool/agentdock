@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from agentcore.drivers.codex_appserver import AppServerError
 from agentcore.models import AgentConfig, ResolvedLimits, TaskBody
 
 pytestmark = pytest.mark.unit
@@ -23,276 +24,392 @@ def collector():
     return events, emit
 
 
-class FakeStdin:
-    def __init__(self):
-        self.data = b""
+class FakeAppServer:
+    """Stands in for AppServerClient: records requests, replays scripted messages."""
 
-    def write(self, b):
-        self.data += b
+    def __init__(self, messages=(), *, thread_id="thr_1", fail=None, hang=None):
+        self.requests = []
+        self.messages = list(messages)
+        self.thread_id = thread_id
+        self.fail = dict(fail or {})
+        self.hang = dict(hang or {})
+        self._seen = {}
+        self.alive = True
+        self.terminated = False
+        self.closed = False
 
-    async def drain(self):
-        pass
+    async def request(self, method, params, timeout=None):  # noqa: ASYNC109
+        self.requests.append((method, params))
+        self._seen.setdefault(method, asyncio.Event()).set()
+        if method in self.hang:
+            await self.hang[method].wait()
+        if method in self.fail:
+            error = self.fail[method]
+            raise error if isinstance(error, Exception) else AppServerError(f"{method}: {error}")
+        if method == "thread/start":
+            return {"thread": {"id": self.thread_id}}
+        return {}
 
-    def close(self):
-        pass
-
-
-class FakeStdout:
-    def __init__(self, lines):
-        self._lines = list(lines)
-
-    async def readline(self):
-        if self._lines:
-            return self._lines.pop(0)
-        return b""
-
-
-class FakeProc:
-    def __init__(self, lines, returncode=0):
-        self.stdin = FakeStdin()
-        self.stdout = FakeStdout([ln.encode() if isinstance(ln, str) else ln for ln in lines])
-        self.returncode = None
-        self._final_rc = returncode
+    async def next_message(self, timeout):  # noqa: ASYNC109
+        if self.messages:
+            return self.messages.pop(0)
+        await asyncio.sleep(0)
+        return None
 
     def terminate(self):
-        self.returncode = -15
+        self.terminated = True
+        self.alive = False
 
-    async def wait(self):
-        self.returncode = self._final_rc
-        return self._final_rc
+    def abort(self):
+        self.terminate()
+
+    async def close(self, timeout=5.0):  # noqa: ASYNC109
+        self.closed = True
+        self.alive = False
+
+    def params(self, method):
+        return [p for m, p in self.requests if m == method]
+
+    async def requested(self, method):
+        await self._seen.setdefault(method, asyncio.Event()).wait()
+
+    def methods(self):
+        return [m for m, _ in self.requests]
 
 
-def patch_proc(monkeypatch, proc):
-    async def fake_exec(*args, **kwargs):
-        proc.returncode = None
-        return proc
+def patch_servers(monkeypatch, servers):
+    """Each app-server start takes the next FakeAppServer; records the start args."""
+    starts = []
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    async def fake_start(cmd, *, cwd, env):
+        server = servers.pop(0)
+        starts.append({"cmd": cmd, "cwd": cwd, "env": env})
+        return server
+
+    monkeypatch.setattr("agentcore.drivers.codex.start_app_server", fake_start)
+    return starts
 
 
-@pytest.mark.asyncio
-async def test_terminate_failure_during_cleanup_does_not_mask_error(monkeypatch, tmp_path):
-    # Reproduces tsk_01kvsjy…: an exception in the read loop sends control to the
-    # except handler, whose first act is proc.terminate(); when that raises EPERM
-    # (root lacks CAP_KILL for the agent-uid child) it must NOT escape/mask — the
-    # task should fail cleanly as codex_error carrying the real cause.
+def note(method, **params):
+    return {"method": method, "params": params}
+
+
+def agent_message(text, item_id=None):
+    return note("item/completed", item={"type": "agentMessage",
+                                        "id": item_id or f"msg_{len(text)}_{text[:8]}",
+                                        "text": text})
+
+
+def usage(inp, out):
+    return note("thread/tokenUsage/updated",
+                tokenUsage={"last": {"inputTokens": inp, "outputTokens": out}})
+
+
+def turn_completed(status="completed", error=None):
+    return note("turn/completed", turn={"status": status, "error": error})
+
+
+def answer(*texts):
+    return [note("turn/started"), *[agent_message(t) for t in texts], turn_completed()]
+
+
+async def run(task=None, config=None, *, tmp_path, limits=LIMITS, cancel=None, **kwargs):
     from agentcore.drivers.codex import CodexDriver
 
-    class BoomStdout:
-        async def readline(self):
-            raise RuntimeError("stream blew up")
-
-    class KillProc:
-        def __init__(self):
-            self.stdin = FakeStdin()
-            self.stdout = BoomStdout()
-            self.returncode = None
-
-        def terminate(self):
-            raise PermissionError(1, "Operation not permitted")
-
-        async def wait(self):
-            self.returncode = -15
-            return -15
-
-    patch_proc(monkeypatch, KillProc())
     events, emit = collector()
-
     result = await CodexDriver().run(
-        task=TaskBody(prompt="x"), config=cfg(), limits=LIMITS,
-        credential="sk", emit=emit, cancel=asyncio.Event(),
-        workspace=str(tmp_path),
+        task=task or TaskBody(prompt="do it"), config=config or cfg(), limits=limits,
+        credential=kwargs.pop("credential", "sk"), emit=emit,
+        cancel=cancel or asyncio.Event(), workspace=str(tmp_path), **kwargs,
     )
-
-    assert result.success is False
-    assert result.reason == "codex_error"
-    final = events[-1][1]
-    assert final["to"] == "failed"
-    assert final["error"]["code"] == "codex_error"
-    assert "stream blew up" in final["error"]["message"]
+    return result, events
 
 
 @pytest.mark.asyncio
 async def test_success_emits_result_and_tokens(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
+    server = FakeAppServer([note("turn/started"), agent_message("all done"), usage(100, 20),
+                            turn_completed()])
+    patch_servers(monkeypatch, [server])
 
-    lines = [
-        '{"type":"item.completed","item":{"type":"agent_message","text":"all done"}}\n',
-        '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":20}}\n',
-    ]
-    proc = FakeProc(lines, returncode=0)
-    patch_proc(monkeypatch, proc)
-    events, emit = collector()
-
-    result = await CodexDriver().run(
-        task=TaskBody(prompt="do it"), config=cfg(), limits=LIMITS,
-        credential="sk", emit=emit, cancel=asyncio.Event(),
-        workspace=str(tmp_path),
-    )
+    result, events = await run(tmp_path=tmp_path)
 
     assert result.success
     assert result.output == "all done"
-    # cfg() sets system_prompt="P"; it travels via config.toml
-    # developer_instructions, so stdin is the bare task prompt.
-    # instructions above the task prompt (codex hardening).
-    assert proc.stdin.data == b"do it"
+    assert server.params("turn/start")[0]["input"] == [{"type": "text", "text": "do it"}]
     types = [t for t, _ in events]
     assert types[0] == "status_change"
     assert "codex_event" in types
-    assert "token_update" in types
     tok = [p for t, p in events if t == "token_update"][-1]
     assert tok == {"tokens_in": 100, "tokens_out": 20}
     assert events[-1][1]["to"] == "completed"
+    assert server.closed
 
 
 @pytest.mark.asyncio
-async def test_turn_failed_nonzero_exit_fails(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
+async def test_codex_events_keep_the_exec_shape(monkeypatch, tmp_path):
+    patch_servers(monkeypatch, [FakeAppServer(answer("hi"))])
 
-    lines = ['{"type":"turn.failed","error":{"message":"model exploded"}}\n']
-    proc = FakeProc(lines, returncode=1)
-    patch_proc(monkeypatch, proc)
-    events, emit = collector()
+    _, events = await run(tmp_path=tmp_path)
 
-    result = await CodexDriver().run(
-        task=TaskBody(prompt="x"), config=cfg(), limits=LIMITS,
-        credential="sk", emit=emit, cancel=asyncio.Event(),
-        workspace=str(tmp_path),
-    )
+    raws = [p["raw"] for t, p in events if t == "codex_event"]
+    assert [r["type"] for r in raws] == [
+        "thread.started", "turn.started", "item.completed", "turn.completed"]
+    assert raws[0] == {"type": "thread.started", "thread_id": "thr_1"}
+    assert raws[2]["item"] == {"id": "item_0", "type": "agent_message", "text": "hi"}
+
+
+@pytest.mark.asyncio
+async def test_turn_failed_fails_with_the_codex_message(monkeypatch, tmp_path):
+    server = FakeAppServer([note("turn/started"),
+                            note("error", error={"message": "model exploded"}),
+                            turn_completed("failed", {"message": "model exploded"})])
+    patch_servers(monkeypatch, [server])
+
+    result, events = await run(tmp_path=tmp_path)
 
     assert not result.success
     assert result.reason == "model exploded"
     assert events[-1][1]["to"] == "failed"
-    assert events[-1][1]["error"]["message"] == "model exploded"
+    assert events[-1][1]["error"] == {"code": "codex_error", "message": "model exploded"}
 
 
 @pytest.mark.asyncio
 async def test_cancellation_returns_cancelled(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
-
-    proc = FakeProc(["line\n"] * 100, returncode=0)
-    patch_proc(monkeypatch, proc)
+    server = FakeAppServer([])
+    patch_servers(monkeypatch, [server])
     cancel = asyncio.Event()
-    cancel.set()
-    events, emit = collector()
 
-    result = await CodexDriver().run(
-        task=TaskBody(prompt="x"), config=cfg(), limits=LIMITS,
-        credential="sk", emit=emit, cancel=cancel, workspace=str(tmp_path),
-    )
+    async def cancel_once_turn_runs():
+        try:
+            await asyncio.wait_for(server.requested("turn/start"), timeout=5)
+        finally:
+            cancel.set()
 
-    assert not result.success
+    canceller = asyncio.create_task(cancel_once_turn_runs())
+    result, events = await run(tmp_path=tmp_path, cancel=cancel)
+    await canceller
+
     assert result.reason == "cancelled"
     assert events[-1][1]["to"] == "cancelled"
+    assert server.terminated
 
 
 @pytest.mark.asyncio
 async def test_timeout_returns_timeout(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
+    server = FakeAppServer([])
+    patch_servers(monkeypatch, [server])
+    limits = ResolvedLimits(max_iterations=10, max_tokens=10**9, timeout_seconds=1)
 
-    proc = FakeProc(["line\n"] * 100, returncode=0)
-    patch_proc(monkeypatch, proc)
-    events, emit = collector()
-    limits = ResolvedLimits(max_iterations=10, max_tokens=10**9, timeout_seconds=0)
+    result, events = await run(tmp_path=tmp_path, limits=limits)
 
-    result = await CodexDriver().run(
-        task=TaskBody(prompt="x"), config=cfg(), limits=limits,
-        credential="sk", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
-
-    assert not result.success
     assert result.reason == "timeout"
     assert events[-1][1]["to"] == "timed_out"
+    assert server.terminated
+    assert "turn/start" in server.methods()
+
+
+# Cancel and timeout while the thread is being set up
+
+
+def hanging(method, **kwargs):
+    return FakeAppServer([], hang={method: asyncio.Event()}, **kwargs)
+
+
+def cancel_soon(delay=0.05):
+    cancel = asyncio.Event()
+    asyncio.get_running_loop().call_later(delay, cancel.set)
+    return cancel
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_thread_start_hangs(monkeypatch, tmp_path):
+    server = hanging("thread/start")
+    patch_servers(monkeypatch, [server])
+
+    result, events = await run(tmp_path=tmp_path, cancel=cancel_soon())
+
+    assert result.reason == "cancelled"
+    assert events[-1] == ("status_change", {"from": "running", "to": "cancelled",
+                                            "result": None, "error": None})
+    assert server.terminated
+    assert "turn/start" not in server.methods()
+
+
+@pytest.mark.asyncio
+async def test_timeout_while_thread_start_hangs(monkeypatch, tmp_path):
+    server = hanging("thread/start")
+    patch_servers(monkeypatch, [server])
+    limits = ResolvedLimits(max_iterations=10, max_tokens=10**9, timeout_seconds=1)
+
+    result, events = await run(tmp_path=tmp_path, limits=limits)
+
+    assert result.reason == "timeout"
+    assert ("log", {"level": "warn", "message": "wall-clock timeout", "data": {}}) in events
+    assert events[-1][1]["to"] == "timed_out"
+    assert events[-1][1]["error"] == {"code": "timeout", "message": "wall-clock timeout"}
+    assert server.terminated
+    assert "turn/start" not in server.methods()
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_resume_hangs(monkeypatch, tmp_path):
+    from agentcore.drivers.session_state import write_session_state
+
+    write_session_state(str(tmp_path), "codex", "s-hang", {"thread_id": "thr_old"})
+    server = hanging("thread/resume")
+    patch_servers(monkeypatch, [server])
+
+    result, _ = await run(tmp_path=tmp_path, cancel=cancel_soon(), session_id="s-hang",
+                          session_is_continuation=True)
+
+    assert result.reason == "cancelled"
+    assert server.terminated
+    assert "turn/start" not in server.methods()
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_turn_start_hangs(monkeypatch, tmp_path):
+    server = hanging("turn/start")
+    patch_servers(monkeypatch, [server])
+
+    result, _ = await run(tmp_path=tmp_path, cancel=cancel_soon())
+
+    assert result.reason == "cancelled"
+    assert server.terminated
+
+
+@pytest.mark.asyncio
+async def test_cancel_set_before_run_starts_nothing(monkeypatch, tmp_path):
+    servers = [FakeAppServer(answer("hi"))]
+    starts = patch_servers(monkeypatch, servers)
+    cancel = asyncio.Event()
+    cancel.set()
+
+    result, events = await run(tmp_path=tmp_path, cancel=cancel)
+
+    assert result.reason == "cancelled"
+    assert events[-1][1]["to"] == "cancelled"
+    assert starts == []
+    assert len(servers) == 1
+
+
+@pytest.mark.asyncio
+async def test_spent_budget_starts_nothing(monkeypatch, tmp_path):
+    starts = patch_servers(monkeypatch, [FakeAppServer(answer("hi"))])
+    limits = ResolvedLimits(max_iterations=10, max_tokens=10**9, timeout_seconds=0)
+
+    result, events = await run(tmp_path=tmp_path, limits=limits)
+
+    assert result.reason == "timeout"
+    assert events[-1][1]["to"] == "timed_out"
+    assert starts == []
+
+
+@pytest.mark.asyncio
+async def test_driver_task_cancelled_during_setup_aborts_the_client(monkeypatch, tmp_path):
+    server = hanging("thread/start")
+    patch_servers(monkeypatch, [server])
+
+    task = asyncio.create_task(run(tmp_path=tmp_path))
+    await server.requested("thread/start")
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.sleep(0)
+
+    assert server.terminated
+
+
+@pytest.mark.asyncio
+async def test_unexpected_error_during_setup_aborts_the_client(monkeypatch, tmp_path):
+    from agentcore.drivers.codex import CodexDriver
+
+    server = FakeAppServer(answer("hi"))
+    patch_servers(monkeypatch, [server])
+
+    async def emit(event_type, payload):
+        if event_type == "codex_event" and payload["raw"]["type"] == "thread.started":
+            raise RuntimeError("emit broke")
+
+    with pytest.raises(RuntimeError, match="emit broke"):
+        await CodexDriver().run(task=TaskBody(prompt="do it"), config=cfg(), limits=LIMITS,
+                                credential="sk", emit=emit, cancel=asyncio.Event(),
+                                workspace=str(tmp_path))
+
+    assert server.terminated
+    assert "turn/start" not in server.methods()
 
 
 @pytest.mark.asyncio
 async def test_missing_binary_reports_unavailable(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
-
-    async def boom(*args, **kwargs):
+    async def boom(cmd, *, cwd, env):
         raise FileNotFoundError("codex")
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", boom)
-    events, emit = collector()
+    monkeypatch.setattr("agentcore.drivers.codex.start_app_server", boom)
 
-    result = await CodexDriver().run(
-        task=TaskBody(prompt="x"), config=cfg(), limits=LIMITS,
-        credential="sk", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
+    result, events = await run(tmp_path=tmp_path)
 
-    assert not result.success
     assert result.reason == "codex_unavailable"
     assert events[-1][1]["error"]["code"] == "codex_unavailable"
 
 
 @pytest.mark.asyncio
+async def test_failed_thread_start_fails_cleanly(monkeypatch, tmp_path):
+    server = FakeAppServer(fail={"thread/start": "no auth"})
+    patch_servers(monkeypatch, [server])
+
+    result, events = await run(tmp_path=tmp_path)
+
+    assert result.reason == "codex_error"
+    assert events[-1][1]["error"]["code"] == "codex_error"
+    assert "no auth" in events[-1][1]["error"]["message"]
+    assert not server.alive
+
+
+@pytest.mark.asyncio
+async def test_process_exit_without_turn_completed(monkeypatch, tmp_path):
+    patch_servers(monkeypatch, [FakeAppServer([note("_exit", returncode=2)])])
+
+    result, events = await run(tmp_path=tmp_path)
+
+    assert result.reason == "codex exited 2"
+    assert events[-1][1]["error"]["code"] == "codex_nonzero_exit"
+
+
+@pytest.mark.asyncio
+async def test_stderr_lines_become_codex_stdout(monkeypatch, tmp_path):
+    patch_servers(monkeypatch, [FakeAppServer([note("_stderr", line="warn: x"), *answer("ok")])])
+
+    _, events = await run(tmp_path=tmp_path)
+
+    assert ("codex_stdout", {"line": "warn: x"}) in events
+
+
+@pytest.mark.asyncio
+async def test_declined_client_request_is_logged(monkeypatch, tmp_path):
+    patch_servers(monkeypatch, [FakeAppServer([note("_declined", request="item/x"),
+                                               *answer("ok")])])
+
+    _, events = await run(tmp_path=tmp_path)
+
+    logs = [p for t, p in events if t == "log" and p.get("op") == "codex_client_request_declined"]
+    assert logs and logs[0]["request"] == "item/x"
+
+
+@pytest.mark.asyncio
 async def test_oauth_subscription_writes_auth_json(monkeypatch, tmp_path):
-    import json as _json
     from pathlib import Path
 
-    from agentcore.drivers.codex import CodexDriver, codex_home
+    from agentcore.drivers.codex import codex_home
 
-    line = '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}\n'
-    proc = FakeProc([line], returncode=0)
-    patch_proc(monkeypatch, proc)
-    events, emit = collector()
+    patch_servers(monkeypatch, [FakeAppServer(answer("ok"))])
 
-    await CodexDriver().run(
-        task=TaskBody(prompt="x"), config=cfg(), limits=LIMITS,
-        credential="access-tok", emit=emit, cancel=asyncio.Event(),
-        credential_kind="oauth_subscription",
-        credential_meta={"refresh_token": "ref", "account_id": "acct"},
-        workspace=str(tmp_path),
-    )
+    await run(tmp_path=tmp_path, credential="access-tok", credential_kind="oauth_subscription",
+              credential_meta={"refresh_token": "ref", "account_id": "acct"})
 
-    auth = Path(codex_home(str(tmp_path))) / "auth.json"
-    assert auth.exists()
-    data = _json.loads(auth.read_text())
+    data = json.loads((Path(codex_home(str(tmp_path))) / "auth.json").read_text())
     assert data["tokens"]["access_token"] == "access-tok"
     assert data["tokens"]["refresh_token"] == "ref"
-
-
-@pytest.mark.asyncio
-async def test_stdin_broken_pipe_fails_cleanly(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
-
-    class BrokenStdin(FakeStdin):
-        async def drain(self):
-            raise BrokenPipeError("codex died")
-
-    proc = FakeProc([], returncode=1)
-    proc.stdin = BrokenStdin()
-    patch_proc(monkeypatch, proc)
-    events, emit = collector()
-
-    result = await CodexDriver().run(
-        task=TaskBody(prompt="x"), config=cfg(), limits=LIMITS,
-        credential="sk", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
-
-    assert not result.success
-    assert result.reason == "codex_error"
-    assert events[-1][1]["to"] == "failed"
-    assert events[-1][1]["error"]["code"] == "codex_error"
-
-
-@pytest.mark.asyncio
-async def test_nonzero_exit_without_error_event(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
-
-    proc = FakeProc([], returncode=2)
-    patch_proc(monkeypatch, proc)
-    events, emit = collector()
-
-    result = await CodexDriver().run(
-        task=TaskBody(prompt="x"), config=cfg(), limits=LIMITS,
-        credential="sk", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
-
-    assert not result.success
-    assert result.reason == "codex exited 2"
-    assert events[-1][1]["to"] == "failed"
-    assert events[-1][1]["error"]["code"] == "codex_nonzero_exit"
 
 
 def test_codex_self_registers():
@@ -320,284 +437,146 @@ def test_codex_capabilities_and_template():
 
 
 @pytest.mark.asyncio
-async def test_codex_session_first_turn_drops_ephemeral_and_writes_state(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
+async def test_one_off_task_deletes_its_thread(monkeypatch, tmp_path):
+    server = FakeAppServer(answer("hi"), thread_id="thr_x")
+    patch_servers(monkeypatch, [server])
 
-    captured_cmd = {}
+    await run(tmp_path=tmp_path)
 
-    async def fake_spawn(argv, *, cwd, env, **kwargs):
-        captured_cmd["argv"] = argv
-        return FakeProc(
-            ['{"type":"thread.started","thread_id":"codex-thread-1"}',
-             '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hi"}}'],
-            returncode=0,
-        )
+    assert server.params("thread/start")[0]["ephemeral"] is False
+    assert server.params("thread/delete") == [{"threadId": "thr_x"}]
 
-    monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
-    # ensure_agent_dir is left real (not stubbed): it's a plain os.makedirs in
-    # non-root test environments, and session_state.write_session_state relies
-    # on it to actually create the on-disk sessions/ dir on a session's first
-    # turn (same fix as test_claude_code_loop.py's patch_proc, task 3).
 
-    driver = CodexDriver()
-    events, emit = collector()
-    result = await driver.run(
-        task=TaskBody(prompt="hello"), config=cfg(), limits=LIMITS,
-        credential="cred", emit=emit, cancel=asyncio.Event(),
-        workspace=str(tmp_path), session_id="sess-1", session_is_continuation=False,
-    )
+@pytest.mark.asyncio
+async def test_session_first_turn_keeps_its_thread_and_writes_state(monkeypatch, tmp_path):
+    from agentcore.drivers.session_state import read_session_state
+
+    server = FakeAppServer(answer("hi"), thread_id="codex-thread-1")
+    patch_servers(monkeypatch, [server])
+
+    result, _ = await run(tmp_path=tmp_path, session_id="sess-1",
+                          session_is_continuation=False)
 
     assert result.success is True
-    assert "--ephemeral" not in captured_cmd["argv"]
-    from agentcore.drivers.session_state import read_session_state
+    assert "thread/delete" not in server.methods()
     assert read_session_state(str(tmp_path), "codex", "sess-1") == {"thread_id": "codex-thread-1"}
 
 
 @pytest.mark.asyncio
-async def test_codex_session_continuation_uses_resume_command(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
+async def test_session_continuation_resumes_the_thread(monkeypatch, tmp_path):
     from agentcore.drivers.session_state import write_session_state
 
     write_session_state(str(tmp_path), "codex", "sess-2", {"thread_id": "codex-thread-1"})
-    captured_cmd = {}
+    server = FakeAppServer(answer("ok"))
+    patch_servers(monkeypatch, [server])
 
-    async def fake_spawn(argv, *, cwd, env, **kwargs):
-        captured_cmd["argv"] = argv
-        return FakeProc(
-            ['{"type":"thread.started","thread_id":"codex-thread-1"}',
-             '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"ok"}}'],
-            returncode=0,
-        )
-
-    monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
-    monkeypatch.setattr("agentcore.sandbox.ensure_agent_dir", lambda *a, **kw: None)
-
-    driver = CodexDriver()
-    events, emit = collector()
-    result = await driver.run(
-        task=TaskBody(prompt="continue"), config=cfg(), limits=LIMITS,
-        credential="cred", emit=emit, cancel=asyncio.Event(),
-        workspace=str(tmp_path), session_id="sess-2", session_is_continuation=True,
-    )
+    result, _ = await run(TaskBody(prompt="continue"), tmp_path=tmp_path, session_id="sess-2",
+                          session_is_continuation=True)
 
     assert result.success is True
-    assert captured_cmd["argv"][:3] == ["codex", "exec", "resume"]
-    assert "codex-thread-1" in captured_cmd["argv"]
-    assert "-C" not in captured_cmd["argv"]
+    assert server.methods()[:2] == ["thread/resume", "turn/start"]
+    assert server.params("thread/resume")[0]["threadId"] == "codex-thread-1"
+    assert server.params("turn/start")[0]["threadId"] == "codex-thread-1"
+    assert "thread/delete" not in server.methods()
 
 
 @pytest.mark.asyncio
-async def test_codex_session_missing_state_fails_fast(tmp_path):
-    from agentcore.drivers.codex import CodexDriver
-
-    driver = CodexDriver()
-    events, emit = collector()
-    result = await driver.run(
-        task=TaskBody(prompt="hi"), config=cfg(), limits=LIMITS,
-        credential="cred", emit=emit, cancel=asyncio.Event(),
-        workspace=str(tmp_path), session_id="sess-missing", session_is_continuation=True,
-    )
+async def test_session_missing_state_fails_fast(tmp_path):
+    result, _ = await run(TaskBody(prompt="hi"), tmp_path=tmp_path, session_id="sess-missing",
+                          session_is_continuation=True)
 
     assert result.success is False
     assert result.reason == "session_state_lost"
 
 
 @pytest.mark.asyncio
-async def test_codex_no_session_id_unchanged(monkeypatch, tmp_path):
-    """Omitting session_id must behave exactly like today: --ephemeral stays, no state file."""
-    import os
-
-    from agentcore.drivers.codex import CodexDriver
-
-    captured_cmd = {}
-
-    async def fake_spawn(argv, *, cwd, env, **kwargs):
-        captured_cmd["argv"] = argv
-        return FakeProc(
-            ['{"type":"thread.started","thread_id":"codex-thread-x"}',
-             '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hi"}}'],
-            returncode=0,
-        )
-
-    monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
-    monkeypatch.setattr("agentcore.sandbox.ensure_agent_dir", lambda *a, **kw: None)
-
-    driver = CodexDriver()
-    events, emit = collector()
-    result = await driver.run(
-        task=TaskBody(prompt="hi"), config=cfg(), limits=LIMITS,
-        credential="cred", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
-
-    assert result.success is True
-    assert "--ephemeral" in captured_cmd["argv"]
-    assert not os.path.isdir(os.path.join(str(tmp_path), ".agent-state", "codex", "sessions"))
-
-
-@pytest.mark.asyncio
-async def test_codex_run_passes_configured_tools_into_the_command(monkeypatch, tmp_path):
-    """A fresh run's config.tools reaches the spawned codex command as the
-    matching -c overrides (spec: per-task/per-config tools override)."""
-    from agentcore.drivers.codex import CodexDriver
-
-    captured_cmd = {}
-
-    async def fake_spawn(argv, *, cwd, env, **kwargs):
-        captured_cmd["argv"] = argv
-        return FakeProc(
-            ['{"type":"thread.started","thread_id":"codex-thread-tools"}',
-             '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hi"}}'],
-            returncode=0,
-        )
-
-    monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
-    monkeypatch.setattr("agentcore.sandbox.ensure_agent_dir", lambda *a, **kw: None)
-
-    driver = CodexDriver()
-    events, emit = collector()
+async def test_configured_tools_reach_the_command(monkeypatch, tmp_path):
+    starts = patch_servers(monkeypatch, [FakeAppServer(answer("hi"))])
     config = AgentConfig(driver="codex", model="gpt-5-codex", tools=["goals"])
-    result = await driver.run(
-        task=TaskBody(prompt="hi"), config=config, limits=LIMITS,
-        credential="cred", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
 
-    assert result.success is True
-    argv = captured_cmd["argv"]
-    idx = argv.index("features.goals=true")
-    assert argv[idx - 1] == "-c"
-    assert "web_search=disabled" in argv
+    await run(config=config, tmp_path=tmp_path)
+
+    cmd = starts[0]["cmd"]
+    assert cmd[:2] == ["codex", "app-server"]
+    assert cmd[cmd.index("features.goals=true") - 1] == "-c"
+    assert "web_search=disabled" in cmd
 
 
 @pytest.mark.asyncio
-async def test_codex_resumed_run_passes_configured_tools_into_the_command(monkeypatch, tmp_path):
-    """A resumed session's config.tools reaches the resume command the same way."""
-    from agentcore.drivers.codex import CodexDriver
+async def test_resumed_run_passes_configured_tools(monkeypatch, tmp_path):
     from agentcore.drivers.session_state import write_session_state
 
-    write_session_state(str(tmp_path), "codex", "sess-tools", {"thread_id": "codex-thread-tools"})
-    captured_cmd = {}
-
-    async def fake_spawn(argv, *, cwd, env, **kwargs):
-        captured_cmd["argv"] = argv
-        return FakeProc(
-            ['{"type":"thread.started","thread_id":"codex-thread-tools"}',
-             '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"ok"}}'],
-            returncode=0,
-        )
-
-    monkeypatch.setattr("agentcore.sandbox.spawn_untrusted", fake_spawn)
-    monkeypatch.setattr("agentcore.sandbox.ensure_agent_dir", lambda *a, **kw: None)
-
-    driver = CodexDriver()
-    events, emit = collector()
+    write_session_state(str(tmp_path), "codex", "sess-tools", {"thread_id": "thr_t"})
+    starts = patch_servers(monkeypatch, [FakeAppServer(answer("ok"))])
     config = AgentConfig(driver="codex", model="gpt-5-codex", tools=["goals"])
-    result = await driver.run(
-        task=TaskBody(prompt="continue"), config=config, limits=LIMITS,
-        credential="cred", emit=emit, cancel=asyncio.Event(),
-        workspace=str(tmp_path), session_id="sess-tools", session_is_continuation=True,
-    )
 
-    assert result.success is True
-    argv = captured_cmd["argv"]
-    idx = argv.index("features.goals=true")
-    assert argv[idx - 1] == "-c"
-    assert "web_search=disabled" in argv
+    await run(config=config, tmp_path=tmp_path, session_id="sess-tools",
+              session_is_continuation=True)
+
+    assert "features.goals=true" in starts[0]["cmd"]
 
 
 @pytest.mark.asyncio
-async def test_run_materializes_configured_system_prompt(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver, codex_home
+async def test_system_prompt_travels_as_developer_instructions(monkeypatch, tmp_path):
+    from pathlib import Path
 
-    proc = FakeProc([])
-    patch_proc(monkeypatch, proc)
-    events, emit = collector()
-    config = AgentConfig(
-        driver="codex", model="gpt-5-codex",
-        system_prompt="You are a security auditor.", tools=[],
-    )
-    await CodexDriver().run(
-        task=TaskBody(prompt="x"), config=config, limits=LIMITS,
-        credential="sk", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
-    import pathlib
-    import tomllib
-    cfg_toml = pathlib.Path(codex_home(str(tmp_path))) / "config.toml"
-    assert tomllib.loads(cfg_toml.read_text())["developer_instructions"] == (
-        "You are a security auditor."
-    )
-    assert not (pathlib.Path(codex_home(str(tmp_path))) / "AGENTS.md").exists()
+    from agentcore.drivers.codex import codex_config_path
+
+    server = FakeAppServer(answer("ok"))
+    patch_servers(monkeypatch, [server])
+    config = AgentConfig(driver="codex", model="gpt-5-codex",
+                         system_prompt="You are a security auditor.", tools=[])
+
+    await run(config=config, tmp_path=tmp_path)
+
+    params = server.params("thread/start")[0]
+    assert params["developerInstructions"] == "You are a security auditor."
+    assert params["model"] == "gpt-5-codex"
+    assert not Path(codex_config_path(str(tmp_path))).exists()
 
 
 @pytest.mark.asyncio
 async def test_run_removes_agents_md_written_by_older_driver(monkeypatch, tmp_path):
     import pathlib
 
-    from agentcore.drivers.codex import CodexDriver, codex_home
+    from agentcore.drivers.codex import codex_home
 
     stale = pathlib.Path(codex_home(str(tmp_path))) / "AGENTS.md"
     stale.parent.mkdir(parents=True)
     stale.write_text("old prompt")
-    proc = FakeProc([])
-    patch_proc(monkeypatch, proc)
-    events, emit = collector()
-    await CodexDriver().run(
-        task=TaskBody(prompt="x"), config=cfg(), limits=LIMITS,
-        credential="sk", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
+    patch_servers(monkeypatch, [FakeAppServer(answer("ok"))])
+
+    await run(tmp_path=tmp_path)
+
     assert not stale.exists()
 
 
 @pytest.mark.asyncio
-async def test_run_sends_task_prompt_verbatim_even_with_system_prompt(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
+async def test_task_prompt_is_sent_verbatim(monkeypatch, tmp_path):
+    server = FakeAppServer(answer("ok"))
+    patch_servers(monkeypatch, [server])
+    config = AgentConfig(driver="codex", model="gpt-5-codex", system_prompt="Answer tersely.",
+                         tools=[])
 
-    proc = FakeProc([])
-    patch_proc(monkeypatch, proc)
-    events, emit = collector()
-    config = AgentConfig(
-        driver="codex", model="gpt-5-codex",
-        system_prompt="Answer tersely.", tools=[],
-    )
-    await CodexDriver().run(
-        task=TaskBody(prompt="what is DNS?"), config=config, limits=LIMITS,
-        credential="sk", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
-    assert proc.stdin.data.decode() == "what is DNS?"
+    await run(TaskBody(prompt="what is DNS?"), config, tmp_path=tmp_path)
+
+    assert server.params("turn/start")[0]["input"] == [{"type": "text", "text": "what is DNS?"}]
 
 
 @pytest.mark.asyncio
-async def test_run_stdin_is_bare_prompt_without_system_prompt(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
+async def test_effort_and_reasoning_summary_travel_with_the_turn(monkeypatch, tmp_path):
+    server = FakeAppServer(answer("hi"))
+    patch_servers(monkeypatch, [server])
+    config = cfg().model_copy(update={"reasoning_summary": True, "effort": "high"})
 
-    proc = FakeProc([])
-    patch_proc(monkeypatch, proc)
-    events, emit = collector()
-    config = AgentConfig(driver="codex", model="gpt-5-codex", system_prompt="", tools=[])
-    await CodexDriver().run(
-        task=TaskBody(prompt="what is DNS?"), config=config, limits=LIMITS,
-        credential="sk", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
-    assert proc.stdin.data.decode() == "what is DNS?"
+    await run(config=config, tmp_path=tmp_path)
+
+    params = server.params("turn/start")[0]
+    assert params["summary"] == "auto"
+    assert params["effort"] == "high"
 
 
-# ---------------------------------------------------------------------------
-# Task 4: structured output — native --output-schema + validate-and-retry loop
-# ---------------------------------------------------------------------------
-
-
-def patch_procs(monkeypatch, procs):
-    """Each subprocess spawn consumes the next FakeProc; records spawn args."""
-    calls = []
-
-    async def fake_exec(*args, **kwargs):
-        calls.append(args)
-        proc = procs.pop(0)
-        proc.returncode = None
-        return proc
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-    return calls
-
+# Structured output: native outputSchema + validate-and-retry loop
 
 STRUCT_SCHEMA = {
     "type": "object",
@@ -608,123 +587,72 @@ STRUCT_SCHEMA = {
 
 
 def structured_task():
-    return TaskBody(
-        prompt="answer me",
-        output={"type": "structured", "schema": STRUCT_SCHEMA},
-    )
-
-
-def codex_lines(text, thread_id="th_1"):
-    return [
-        f'{{"type": "thread.started", "thread_id": "{thread_id}"}}\n',
-        f'{{"type": "item.completed", "item": {{"type": "agent_message", "text": {json.dumps(text)}}}}}\n',  # noqa: E501
-    ]
+    return TaskBody(prompt="answer me", output={"type": "structured", "schema": STRUCT_SCHEMA})
 
 
 @pytest.mark.asyncio
 async def test_structured_valid_first_attempt(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
+    server = FakeAppServer(answer('{"answer": "42"}'))
+    patch_servers(monkeypatch, [server])
 
-    proc = FakeProc(codex_lines('{"answer": "42"}'))
-    patch_procs(monkeypatch, [proc])
-    events, emit = collector()
-
-    result = await CodexDriver().run(
-        task=structured_task(), config=cfg(), limits=LIMITS, credential="k",
-        emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
+    result, events = await run(structured_task(), tmp_path=tmp_path)
 
     assert result.success is True
     assert result.output == {"answer": "42"}
     completed = [p for t, p in events if t == "status_change" and p["to"] == "completed"]
     assert len(completed) == 1
     assert completed[0]["result"] == {"success": True, "output": {"answer": "42"}}
-    # schema instructions were appended to the prompt fed on stdin
-    assert b"## Output" in proc.stdin.data
+    turn = server.params("turn/start")[0]
+    assert "## Output" in turn["input"][0]["text"]
+    assert turn["outputSchema"] == STRUCT_SCHEMA
+    assert "thread/delete" not in server.methods()
 
 
 @pytest.mark.asyncio
 async def test_structured_retries_then_succeeds(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
+    bad = FakeAppServer(answer("not json at all"), thread_id="th_1")
+    good = FakeAppServer(answer('{"answer": "42"}'))
+    starts = patch_servers(monkeypatch, [bad, good])
 
-    bad = FakeProc(codex_lines("not json at all"))
-    good = FakeProc(codex_lines('{"answer": "42"}'))
-    calls = patch_procs(monkeypatch, [bad, good])
-    events, emit = collector()
-
-    result = await CodexDriver().run(
-        task=structured_task(), config=cfg(), limits=LIMITS, credential="k",
-        emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
+    result, events = await run(structured_task(), tmp_path=tmp_path)
 
     assert result.success is True
     assert result.output == {"answer": "42"}
-    assert len(calls) == 2
-    # second spawn resumes the captured thread
-    assert "resume" in calls[1]
-    assert "th_1" in calls[1]
-    # correction prompt fed to the resumed session
-    assert b"Invalid output" in good.stdin.data
+    assert len(starts) == 2
+    assert good.params("thread/resume")[0]["threadId"] == "th_1"
+    assert "Invalid output" in good.params("turn/start")[0]["input"][0]["text"]
     warns = [p for t, p in events if t == "log" and p["message"] == "structured_output_invalid"]
     assert len(warns) == 1
-    # exactly one terminal completed event
     completed = [p for t, p in events if t == "status_change" and p["to"] == "completed"]
     assert len(completed) == 1
 
 
 @pytest.mark.asyncio
 async def test_structured_fails_after_max_attempts(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
     from agentcore.structured_output import MAX_ATTEMPTS
 
-    procs = [FakeProc(codex_lines("still not json")) for _ in range(MAX_ATTEMPTS)]
-    calls = patch_procs(monkeypatch, list(procs))
-    events, emit = collector()
+    servers = [FakeAppServer(answer("still not json")) for _ in range(MAX_ATTEMPTS)]
+    starts = patch_servers(monkeypatch, list(servers))
 
-    result = await CodexDriver().run(
-        task=structured_task(), config=cfg(), limits=LIMITS, credential="k",
-        emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
+    result, events = await run(structured_task(), tmp_path=tmp_path)
 
     assert result.success is False
     assert result.reason == "invalid_structured_output"
-    assert len(calls) == MAX_ATTEMPTS
+    assert len(starts) == MAX_ATTEMPTS
     failed = [p for t, p in events if t == "status_change" and p["to"] == "failed"]
     assert failed[-1]["error"]["code"] == "invalid_structured_output"
 
 
 @pytest.mark.asyncio
-async def test_structured_native_flag_for_compatible_schema(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
+async def test_structured_no_native_schema_for_incompatible_schema(monkeypatch, tmp_path):
+    task = TaskBody(prompt="p", output={"type": "structured",
+                                        "schema": {"type": "array", "items": {"type": "string"}}})
+    server = FakeAppServer(answer('["a"]'))
+    patch_servers(monkeypatch, [server])
 
-    proc = FakeProc(codex_lines('{"answer": "42"}'))
-    calls = patch_procs(monkeypatch, [proc])
-    _, emit = collector()
+    result, _ = await run(task, tmp_path=tmp_path)
 
-    await CodexDriver().run(
-        task=structured_task(), config=cfg(), limits=LIMITS, credential="k",
-        emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
-    assert "--output-schema" in calls[0]
-
-
-@pytest.mark.asyncio
-async def test_structured_no_native_flag_for_incompatible_schema(monkeypatch, tmp_path):
-    from agentcore.drivers.codex import CodexDriver
-
-    task = TaskBody(
-        prompt="p",
-        output={"type": "structured", "schema": {"type": "array", "items": {"type": "string"}}},
-    )
-    proc = FakeProc(codex_lines('["a"]'))
-    calls = patch_procs(monkeypatch, [proc])
-    _, emit = collector()
-
-    result = await CodexDriver().run(
-        task=task, config=cfg(), limits=LIMITS, credential="k",
-        emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path),
-    )
-    assert "--output-schema" not in calls[0]
+    assert "outputSchema" not in server.params("turn/start")[0]
     assert result.output == ["a"]
 
 
@@ -732,3 +660,408 @@ def test_codex_supports_structured_output():
     from agentcore.drivers.codex import CodexDriver
 
     assert CodexDriver.capabilities.supports_structured_output is True
+
+
+# Progress updates: envelope messages become `progress` events
+
+
+def progress_cfg():
+    return cfg().model_copy(update={"progress_updates": True})
+
+
+def envelope(progress=None, result=None):
+    return json.dumps({"progress": progress, "result": result})
+
+
+@pytest.mark.asyncio
+async def test_progress_messages_become_progress_events_for_a_text_task(monkeypatch, tmp_path):
+    server = FakeAppServer(answer(envelope(progress="Vou ler o ficheiro."),
+                                  envelope(result="Feito.")))
+    patch_servers(monkeypatch, [server])
+
+    result, events = await run(TaskBody(prompt="olá"), progress_cfg(), tmp_path=tmp_path)
+
+    assert [p for t, p in events if t == "progress"] == [{"text": "Vou ler o ficheiro."}]
+    assert result.output == "Feito."
+    completed = [p for t, p in events if t == "status_change" and p["to"] == "completed"]
+    assert completed[0]["result"] == {"success": True, "output": "Feito."}
+    schema = server.params("turn/start")[0]["outputSchema"]
+    assert schema["properties"]["result"] == {"type": ["string", "null"]}
+
+
+@pytest.mark.asyncio
+async def test_progress_messages_for_a_structured_task_return_the_unwrapped_answer(
+    monkeypatch, tmp_path
+):
+    server = FakeAppServer(answer(envelope(progress="A calcular."),
+                                  envelope(result={"answer": "42"})))
+    patch_servers(monkeypatch, [server])
+
+    result, events = await run(structured_task(), progress_cfg(), tmp_path=tmp_path)
+
+    assert [p for t, p in events if t == "progress"] == [{"text": "A calcular."}]
+    assert result.output == {"answer": "42"}
+    schema = server.params("turn/start")[0]["outputSchema"]
+    assert schema["properties"]["result"]["anyOf"][0] == STRUCT_SCHEMA
+
+
+@pytest.mark.asyncio
+async def test_progress_updates_accept_a_bare_answer_without_the_envelope(monkeypatch, tmp_path):
+    non_native = {"type": "array", "items": {"type": "string", "minLength": 1}}
+    task = TaskBody(prompt="p", output={"type": "structured", "schema": non_native})
+    server = FakeAppServer(answer('["a"]'))
+    patch_servers(monkeypatch, [server])
+
+    result, _ = await run(task, progress_cfg(), tmp_path=tmp_path)
+
+    assert "outputSchema" not in server.params("turn/start")[0]
+    assert result.output == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_progress_rules_travel_in_developer_instructions(monkeypatch, tmp_path):
+    from agentcore.drivers.codex import PROGRESS_INSTRUCTIONS
+
+    server = FakeAppServer(answer(envelope(result="ok")))
+    patch_servers(monkeypatch, [server])
+
+    await run(TaskBody(prompt="hi"), progress_cfg(), tmp_path=tmp_path)
+
+    instructions = server.params("thread/start")[0]["developerInstructions"]
+    assert PROGRESS_INSTRUCTIONS.splitlines()[0] in instructions
+
+
+@pytest.mark.asyncio
+async def test_envelope_text_is_left_alone_when_progress_updates_are_off(monkeypatch, tmp_path):
+    text = envelope(progress="x")
+    server = FakeAppServer(answer(text))
+    patch_servers(monkeypatch, [server])
+
+    result, events = await run(TaskBody(prompt="hi"), tmp_path=tmp_path)
+
+    assert not [p for t, p in events if t == "progress"]
+    assert result.output == text
+    assert "outputSchema" not in server.params("turn/start")[0]
+
+
+# Hot spare
+
+
+def spare_logs(events):
+    return [p for t, p in events if t == "log" and p.get("op") == "codex_spare"]
+
+
+async def run_on(driver, task=None, config=None, *, tmp_path, **kwargs):
+    events, emit = collector()
+    result = await driver.run(
+        task=task or TaskBody(prompt="do it"), config=config or cfg(), limits=LIMITS,
+        credential="sk", emit=emit, cancel=asyncio.Event(), workspace=str(tmp_path), **kwargs,
+    )
+    return result, events
+
+
+_spare_drivers = []
+
+
+@pytest.fixture(autouse=True)
+async def _close_spare_drivers():
+    yield
+    while _spare_drivers:
+        await _spare_drivers.pop().close_spare()
+
+
+def spare_driver():
+    from agentcore.drivers.codex import CodexDriver
+
+    driver = CodexDriver()
+    driver.set_capacity_check(lambda: True)
+    _spare_drivers.append(driver)
+    return driver
+
+
+@pytest.mark.asyncio
+async def test_second_task_runs_on_the_spare(monkeypatch, tmp_path):
+    first = FakeAppServer(answer("one"), thread_id="thr_a")
+    spare = FakeAppServer(answer("two"), thread_id="thr_spare")
+    starts = patch_servers(monkeypatch, [first, spare])
+    driver = spare_driver()
+
+    _, events1 = await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+    result, events2 = await run_on(driver, tmp_path=tmp_path)
+
+    assert spare_logs(events1)[0]["outcome"] == "miss"
+    assert spare_logs(events1)[0]["reason"] == "none"
+    assert spare_logs(events2)[0]["outcome"] == "hit"
+    assert result.output == "two"
+    assert len(starts) == 2
+    assert spare.methods()[:2] == ["thread/start", "turn/start"]
+    assert spare.params("turn/start")[0]["threadId"] == "thr_spare"
+    assert spare.params("thread/delete") == [{"threadId": "thr_spare"}]
+
+
+@pytest.mark.asyncio
+async def test_spare_is_used_for_a_session_first_turn(monkeypatch, tmp_path):
+    from agentcore.drivers.session_state import read_session_state
+
+    patch_servers(monkeypatch, [FakeAppServer(answer("one")),
+                                FakeAppServer(answer("two"), thread_id="thr_spare")])
+    driver = spare_driver()
+
+    await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+    _, events = await run_on(driver, tmp_path=tmp_path, session_id="s1",
+                             session_is_continuation=False)
+
+    assert spare_logs(events)[0]["outcome"] == "hit"
+    assert read_session_state(str(tmp_path), "codex", "s1") == {"thread_id": "thr_spare"}
+
+
+@pytest.mark.asyncio
+async def test_changed_settings_skip_the_spare(monkeypatch, tmp_path):
+    spare = FakeAppServer([], thread_id="thr_spare")
+    cold = FakeAppServer(answer("two"))
+    patch_servers(monkeypatch, [FakeAppServer(answer("one")), spare, cold,
+                                FakeAppServer([], thread_id="thr_next")])
+    driver = spare_driver()
+
+    await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+    other = AgentConfig(driver="codex", model="gpt-5-codex", system_prompt="Other.", tools=[])
+    result, events = await run_on(driver, config=other, tmp_path=tmp_path)
+
+    assert spare_logs(events)[0]["outcome"] == "miss"
+    assert spare_logs(events)[0]["reason"] == "settings_changed"
+    assert spare.terminated
+    assert result.output == "two"
+
+
+@pytest.mark.asyncio
+async def test_changed_agents_md_skips_the_spare(monkeypatch, tmp_path):
+    spare = FakeAppServer([], thread_id="thr_spare")
+    patch_servers(monkeypatch, [FakeAppServer(answer("one")), spare,
+                                FakeAppServer(answer("two")),
+                                FakeAppServer([], thread_id="thr_next")])
+    driver = spare_driver()
+
+    await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+    (tmp_path / "AGENTS.md").write_text("Use tabs.")
+    _, events = await run_on(driver, tmp_path=tmp_path)
+
+    assert spare_logs(events)[0]["outcome"] == "miss"
+    assert spare_logs(events)[0]["reason"] == "settings_changed"
+    assert spare.terminated
+
+
+@pytest.mark.asyncio
+async def test_unchanged_agents_md_keeps_the_spare(monkeypatch, tmp_path):
+    (tmp_path / "AGENTS.md").write_text("Use tabs.")
+    patch_servers(monkeypatch, [FakeAppServer(answer("one")),
+                                FakeAppServer(answer("two"), thread_id="thr_spare"),
+                                FakeAppServer([], thread_id="thr_next")])
+    driver = spare_driver()
+
+    await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+    _, events = await run_on(driver, tmp_path=tmp_path)
+
+    assert spare_logs(events)[0]["outcome"] == "hit"
+
+
+@pytest.mark.asyncio
+async def test_spare_is_built_only_after_the_task_turn_started(monkeypatch, tmp_path):
+    turn_start_reply = asyncio.Event()
+    cold = FakeAppServer(answer("one"), hang={"turn/start": turn_start_reply})
+    servers = [cold, FakeAppServer([], thread_id="thr_spare")]
+    turn_started_before_spare = []
+
+    async def fake_start(cmd, *, cwd, env):
+        if len(servers) == 1:
+            turn_started_before_spare.append(turn_start_reply.is_set())
+        return servers.pop(0)
+
+    asyncio.get_running_loop().call_later(0.05, turn_start_reply.set)
+
+    monkeypatch.setattr("agentcore.drivers.codex.start_app_server", fake_start)
+    driver = spare_driver()
+
+    await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+
+    assert turn_started_before_spare == [True]
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_start_builds_no_spare(monkeypatch, tmp_path):
+    starts = patch_servers(monkeypatch, [FakeAppServer(fail={"turn/start": "no"}),
+                                         FakeAppServer([], thread_id="thr_spare")])
+    driver = spare_driver()
+
+    result, _ = await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+
+    assert result.reason == "codex_error"
+    assert len(starts) == 1
+
+
+@pytest.mark.asyncio
+async def test_spare_hit_log_failure_aborts_the_claimed_spare(monkeypatch, tmp_path):
+    spare = FakeAppServer([], thread_id="thr_spare")
+    patch_servers(monkeypatch, [FakeAppServer(answer("one")), spare])
+    driver = spare_driver()
+
+    await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+
+    async def emit(event_type, payload):
+        if payload.get("op") == "codex_spare" and payload.get("outcome") == "hit":
+            raise RuntimeError("emit broke")
+
+    with pytest.raises(RuntimeError, match="emit broke"):
+        await driver.run(task=TaskBody(prompt="do it"), config=cfg(), limits=LIMITS,
+                         credential="sk", emit=emit, cancel=asyncio.Event(),
+                         workspace=str(tmp_path))
+
+    assert spare.terminated
+
+
+@pytest.mark.asyncio
+async def test_hot_spare_off_builds_nothing(monkeypatch, tmp_path):
+    starts = patch_servers(monkeypatch, [FakeAppServer(answer("one"))])
+    driver = spare_driver()
+    config = cfg().model_copy(update={"hot_spare": False})
+
+    _, events = await run_on(driver, config=config, tmp_path=tmp_path)
+    driver.refill_spare()
+    await driver._spares.ready()
+
+    assert spare_logs(events)[0]["reason"] == "disabled"
+    assert len(starts) == 1
+
+
+@pytest.mark.asyncio
+async def test_dead_spare_falls_back_to_a_cold_start(monkeypatch, tmp_path):
+    dead = FakeAppServer([], thread_id="thr_dead", fail={"turn/start": "gone"})
+    cold = FakeAppServer(answer("two"), thread_id="thr_cold")
+    patch_servers(monkeypatch, [FakeAppServer(answer("one")), dead, cold,
+                                FakeAppServer([], thread_id="thr_next")])
+    driver = spare_driver()
+
+    await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+    result, events = await run_on(driver, tmp_path=tmp_path)
+
+    logs = spare_logs(events)
+    assert [log["outcome"] for log in logs] == ["hit", "miss"]
+    assert logs[1]["reason"] == "dead"
+    assert result.success and result.output == "two"
+    assert cold.params("turn/start")[0]["threadId"] == "thr_cold"
+
+
+@pytest.mark.asyncio
+async def test_continuation_does_not_use_the_spare(monkeypatch, tmp_path):
+    from agentcore.drivers.session_state import write_session_state
+
+    write_session_state(str(tmp_path), "codex", "s2", {"thread_id": "thr_old"})
+    resumed = FakeAppServer(answer("ok"))
+    patch_servers(monkeypatch, [resumed])
+    driver = spare_driver()
+
+    _, events = await run_on(driver, tmp_path=tmp_path, session_id="s2",
+                             session_is_continuation=True)
+
+    assert spare_logs(events)[0]["reason"] == "resume"
+    assert resumed.methods()[0] == "thread/resume"
+
+
+@pytest.mark.asyncio
+async def test_no_spare_without_capacity(monkeypatch, tmp_path):
+    from agentcore.drivers.codex import CodexDriver
+
+    starts = patch_servers(monkeypatch, [FakeAppServer(answer("one"))])
+    driver = CodexDriver()
+    driver.set_capacity_check(lambda: False)
+
+    await run_on(driver, tmp_path=tmp_path)
+    driver.refill_spare()
+    await driver._spares.ready()
+
+    assert len(starts) == 1
+
+
+@pytest.mark.asyncio
+async def test_close_spare_stops_it(monkeypatch, tmp_path):
+    spare = FakeAppServer([], thread_id="thr_spare")
+    patch_servers(monkeypatch, [FakeAppServer(answer("one")), spare])
+    driver = spare_driver()
+
+    await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+    await driver.close_spare()
+
+    assert spare.terminated
+
+
+@pytest.mark.asyncio
+async def test_live_spare_error_reply_fails_without_a_cold_start(monkeypatch, tmp_path):
+    from agentcore.drivers.codex_appserver import AppServerReplyError
+
+    spare = FakeAppServer([], thread_id="thr_spare",
+                          fail={"turn/start": AppServerReplyError("turn/start: bad params")})
+    next_spare = FakeAppServer([], thread_id="thr_next")
+    starts = patch_servers(monkeypatch, [FakeAppServer(answer("one")), spare, next_spare])
+    driver = spare_driver()
+
+    await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+    result, events = await run_on(driver, tmp_path=tmp_path)
+    await driver._spares.ready()
+
+    assert result.reason == "codex_error"
+    assert events[-1][1]["error"] == {"code": "codex_error", "message": "turn/start: bad params"}
+    assert [log["outcome"] for log in spare_logs(events)] == ["hit"]
+    assert len(starts) == 2
+    assert next_spare.methods() == []
+    assert not spare.alive
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_waiting_on_a_spare_build_keeps_the_build(monkeypatch, tmp_path):
+    building = hanging("thread/start", thread_id="thr_spare")
+    patch_servers(monkeypatch, [FakeAppServer(answer("one")), building])
+    driver = spare_driver()
+
+    await run_on(driver, tmp_path=tmp_path)
+    await building.requested("thread/start")
+    events, emit = collector()
+    result = await driver.run(task=TaskBody(prompt="do it"), config=cfg(), limits=LIMITS,
+                              credential="sk", emit=emit, cancel=cancel_soon(),
+                              workspace=str(tmp_path))
+
+    assert result.reason == "cancelled"
+    assert not building.terminated
+    building.hang["thread/start"].set()
+    await driver._spares.ready()
+    spare, reason = await driver._spares.claim(driver._spares._recipe.fingerprint)
+    assert reason == "hit" and spare.client is building
+
+
+def test_codex_config_is_chowned_before_it_appears(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    from agentcore.drivers.codex import codex_config_path, write_codex_config
+    from agentcore.models import ShimMcpServer
+
+    final = Path(codex_config_path(str(tmp_path)))
+    chowned = []
+
+    def chown(path):
+        chowned.append((path, final.exists()))
+
+    monkeypatch.setattr("agentcore.sandbox.chown_to_agent", chown)
+
+    write_codex_config(str(tmp_path), [ShimMcpServer(name="lin", url="https://m")])
+
+    assert chowned == [(str(final.with_suffix(".toml.tmp")), False)]
+    assert final.exists()
