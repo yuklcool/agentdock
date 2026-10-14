@@ -29,7 +29,9 @@ const EMPTY: Draft = {
 
 function urlValidationError(url: string): string | null {
   if (!url) return null;
-  if (!url.startsWith("https://")) return "URL must start with https://";
+  if (!url.startsWith("https://") && !url.startsWith("http://")) {
+    return "URL must start with http:// or https://";
+  }
   return null;
 }
 
@@ -213,7 +215,7 @@ export default function McpEditor() {
         </Field>
 
         {/* URL */}
-        <Field label="URL" hint="The HTTPS endpoint for the MCP server." htmlFor="mcp-url">
+        <Field label="URL" hint="The HTTP or HTTPS endpoint for the MCP server." htmlFor="mcp-url">
           <Input
             id="mcp-url"
             className="fluid-w"
