@@ -113,15 +113,32 @@ class _Connection:
                         httpx.AsyncClient(
                             headers=_headers(self._server),
                             timeout=_HTTP_TIMEOUT,
-                            follow_redirects=True,
+                            follow_redirects=False,
                         )
                     )
                     read, write, _ = await stack.enter_async_context(
                         streamable_http_client(self._server.url, http_client=client)
                     )
                     session = await stack.enter_async_context(ClientSession(read, write))
-                    await session.initialize()
-                    self.listed = await session.list_tools()
+                    initialized = await session.initialize()
+                    tools = []
+                    cursor = None
+                    seen_cursors: set[str] = set()
+                    if initialized.capabilities.tools is not None:
+                        for _ in range(20):
+                            page = await session.list_tools(cursor=cursor)
+                            tools.extend(page.tools)
+                            if len(tools) > 500:
+                                raise ValueError("MCP tool discovery exceeded 500 tools")
+                            cursor = page.nextCursor
+                            if not cursor:
+                                break
+                            if cursor in seen_cursors:
+                                raise ValueError("MCP tool discovery repeated a pagination cursor")
+                            seen_cursors.add(cursor)
+                        else:
+                            raise ValueError("MCP tool discovery exceeded 20 pages")
+                    self.listed = ListToolsResult(tools=tools)
                 self.session = session
                 self._ready.set()
                 # Hold the transport open (its cancel scope must exit in this

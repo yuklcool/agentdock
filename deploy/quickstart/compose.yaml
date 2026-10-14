@@ -23,6 +23,8 @@ services:
     image: ${AGENTDOCK_REGISTRY:-ghcr.io/yuklcool/agentdock}/egress-proxy:${AGENTDOCK_VERSION:-0.3.7}
     environment:
       EGRESS_DENYLIST: ${EGRESS_DENYLIST:-}
+      # Explicit LAN ranges shared with Nanobot; loopback/metadata stay blocked.
+      EGRESS_ALLOW_CIDRS: ${AGENTDOCK_NANOBOT_SSRF_WHITELIST:-}
       EGRESS_UPSTREAM_PROXY: ${EGRESS_UPSTREAM_PROXY:-}
     networks: [agent-runtime-internal, agent-runtime-egress]
 
@@ -50,6 +52,7 @@ services:
       AGENT_REGISTRY_USERNAME: ${AGENT_REGISTRY_USERNAME:-}
       AGENT_REGISTRY_PASSWORD: ${AGENT_REGISTRY_PASSWORD:-}
       AGENTDOCK_NANOBOT_SSRF_WHITELIST: ${AGENTDOCK_NANOBOT_SSRF_WHITELIST:-}
+      AGENTDOCK_MCP_TEST_PROXY: http://egress-proxy:8888
       EXA_API_KEY: ${EXA_API_KEY:-}
     networks: [default, agent-runtime-internal]
     depends_on:

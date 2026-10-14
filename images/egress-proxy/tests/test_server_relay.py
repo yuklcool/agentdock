@@ -21,6 +21,7 @@ class _Upstream(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.send_header("X-Upstream", "yes")
+        self.send_header("Content-Length", str(len(UPSTREAM_BODY)))
         self.end_headers()
         self.wfile.write(UPSTREAM_BODY)
 

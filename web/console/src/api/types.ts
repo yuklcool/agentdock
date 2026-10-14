@@ -247,6 +247,22 @@ export interface Skill {
 // The secret is write-only: never returned. `secret_set` reports whether one is stored.
 export type McpAuthType = "none" | "bearer" | "header";
 
+export interface McpConnectionTestResult {
+  status: "success" | "partial" | "failed";
+  test_location: "control_plane";
+  network_route: "egress_proxy" | "direct";
+  tested_at: string;
+  duration_ms: number;
+  stage: "initialize" | "tools_list" | "complete";
+  server_info: { name: string; version: string } | null;
+  protocol_version: string | null;
+  tools: { name: string; description: string }[];
+  tool_count: number;
+  tools_truncated: boolean;
+  warnings: string[];
+  error: { code: string; message: string } | null;
+}
+
 // ---- Prompt library ---------------------------------------------------------
 export interface PromptVariable { name: string; label?: string; default?: string; }
 export interface Prompt {

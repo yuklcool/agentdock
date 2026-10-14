@@ -104,6 +104,8 @@ Chain tasks into ordered **workflows** across one or more agents, with a visual 
 Each agent owns a `/workspace` volume that survives restarts, pauses, and archival — browse, upload, and download files from the console. **Automatic snapshots** after every task give you a restore-point timeline with non-destructive rollback, plus an optional **Git backup remote** (SSH deploy key, push-on-completion).
 
 ### 🧩 Tools, skills & MCP
+MCP 服务支持 HTTP 和 HTTPS，可在配置页或列表中测试连接并查看工具。HTTP 无需额外开启协议开关；内网访问通过部署白名单管理。配置、接口和更新说明见 [MCP 使用说明](docs/MCP.md)。
+
 The vanilla driver ships a tool palette: read/write/edit/list files, run **bash** and **Python**, **web search** (self-hosted [SearXNG](https://github.com/searxng/searxng) by default), and **web fetch** (text or headless-Chromium-rendered). Extend agents with reusable **skills** (inline or sourced from a Git repo — multi-skill repos install in one pass, and private repos are supported via per-workspace SSH deploy keys) and **[Model Context Protocol](https://modelcontextprotocol.io) (MCP)** servers.
 
 ### 🏢 Multi-tenant workspaces

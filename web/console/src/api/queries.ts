@@ -9,7 +9,7 @@ import type {
   OAuthStartResponse, OAuthConnectionStatus, AnthropicOAuthStart, AnthropicOAuthComplete, ModelOption,
   GitRemote, LinkedRepo, GitSnapshot, Skill, TemplateSavePayload, Event,
   ScheduledTask, ScheduledTaskCreate, ScheduledTaskUpdate, Role, ImageTagsResponse,
-  McpServer, McpAuthType,
+  McpServer, McpAuthType, McpConnectionTestResult,
   Prompt, PromptVariable,
   Workflow, WorkflowRun, WorkflowRunDetail, WorkflowCreate,
   SessionSummary,
@@ -667,6 +667,17 @@ export const useMcpServers = () =>
 
 // Single server — fetched on demand when editing (list and detail both omit the secret).
 export const fetchMcpServer = (id: string) => api.get<McpServer>(`/v1/mcp-servers/${id}`);
+
+export type TestMcpInput = {
+  id?: string;
+  url?: string;
+  auth_type?: McpAuthType;
+  auth_header_name?: string | null;
+  secret?: string;
+};
+
+export const testMcpServer = ({ id, ...body }: TestMcpInput) =>
+  api.post<McpConnectionTestResult>(id ? `/v1/mcp-servers/${id}/test` : "/v1/mcp-servers/test", body);
 
 export type SaveMcpInput = {
   id?: string;

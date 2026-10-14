@@ -1,13 +1,14 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useMcpServers, useDeleteMcpServer } from "../../api/queries";
+import { useMcpServers, useDeleteMcpServer, testMcpServer } from "../../api/queries";
+import { McpTestResult } from "../../components/McpTestResult";
 import { useToast } from "../../components/Toast";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ApiError } from "../../api/client";
 import { Button } from "../../ui/Button";
 import { Pill } from "../../ui/Pill";
 import { Icons } from "../../ui/Icon";
-import type { McpServer } from "../../api/types";
+import type { McpServer, McpConnectionTestResult } from "../../api/types";
 
 function urlHost(url: string): string {
   try { return new URL(url).host; }
@@ -21,8 +22,11 @@ export default function Mcp() {
 
   const [deleting, setDeleting] = useState<McpServer | null>(null);
   const [query, setQuery] = useState("");
+  const [testing, setTesting] = useState<Set<string>>(new Set());
+  const [results, setResults] = useState<Record<string, { signature: string; result: McpConnectionTestResult }>>({});
+  const signature = (s: McpServer) => JSON.stringify([s.url, s.auth_type, s.auth_header_name, s.secret_set, s.updated_at]);
 
-  const servers = data?.mcp_servers ?? [];
+  const servers = useMemo(() => data?.mcp_servers ?? [], [data]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -44,6 +48,20 @@ export default function Mcp() {
         "Couldn't delete MCP server",
         err instanceof ApiError ? err.message : undefined,
       );
+    }
+  }
+
+  async function onTest(s: McpServer) {
+    if (testing.has(s.id)) return;
+    setTesting((ids) => new Set(ids).add(s.id));
+    setResults((previous) => { const next = { ...previous }; delete next[s.id]; return next; });
+    try {
+      const result = await testMcpServer({ id: s.id });
+      setResults((previous) => ({ ...previous, [s.id]: { signature: signature(s), result } }));
+    } catch (err) {
+      toast.error("连接测试失败", err instanceof ApiError ? err.message : undefined);
+    } finally {
+      setTesting((ids) => { const next = new Set(ids); next.delete(s.id); return next; });
     }
   }
 
@@ -98,6 +116,7 @@ export default function Mcp() {
                     <th>Host</th>
                     <th>Auth</th>
                     <th>Status</th>
+                    <th>最近测试（本页）</th>
                     <th aria-label="Actions" />
                   </tr>
                 </thead>
@@ -105,7 +124,7 @@ export default function Mcp() {
                   {visible.length === 0 && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={6}
                         style={{ padding: "28px 14px", textAlign: "center", color: "var(--muted)" }}
                       >
                         No servers match your search.
@@ -113,7 +132,7 @@ export default function Mcp() {
                     </tr>
                   )}
                   {visible.map((s) => (
-                    <tr key={s.id}>
+                    <Fragment key={s.id}><tr>
                       {/* Server: icon + name + description */}
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
@@ -188,8 +207,16 @@ export default function Mcp() {
                       </td>
 
                       {/* Actions */}
+                      <td style={{ fontSize: 12.5 }}>
+                        {testing.has(s.id) ? "测试中…" : results[s.id]?.signature === signature(s)
+                          ? (results[s.id].result.status === "success" ? "成功" : results[s.id].result.status === "partial" ? "部分成功" : "失败")
+                          : "未测试"}
+                      </td>
                       <td>
                         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                          <Button size="sm" variant="secondary" onClick={() => onTest(s)} disabled={testing.has(s.id)}>
+                            {testing.has(s.id) ? "测试中…" : "测试连接"}
+                          </Button>
                           <Link
                             to={`/settings/mcp/${s.id}/edit`}
                             className="btn btn-secondary btn-sm"
@@ -207,6 +234,10 @@ export default function Mcp() {
                         </div>
                       </td>
                     </tr>
+                      {results[s.id]?.signature === signature(s) && <tr>
+                        <td colSpan={6}><McpTestResult result={results[s.id].result} /></td>
+                      </tr>}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
