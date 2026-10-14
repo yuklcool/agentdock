@@ -27,6 +27,7 @@ jobs:
           PYTHONPATH=services/control_plane:services/control_plane/tests pytest -m unit -q services/control_plane/tests
           PYTHONPATH=services/shim pytest -m unit -q services/shim/tests
           PYTHONPATH=services/connectors pytest -m unit -q services/connectors/tests
+          PYTHONPATH=images/egress-proxy pytest -q images/egress-proxy/tests
 
   web-console:
     runs-on: ubuntu-latest

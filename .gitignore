@@ -50,6 +50,7 @@ deploy/.env
 # Internal process docs (plans, specs, audits) — not published
 /docs/*
 !/docs/NANOBOT.md
+!/docs/MCP.md
 
 # Local Claude Code config
 .claude/

@@ -362,6 +362,8 @@ CONTRACTS: list[tuple[str, str, str, str]] = [
     ("GET", "/v1/images/tags", "/v1/images/tags", "auth"),
 
     # ------------------------------------------------------------------
+    ("POST", "/v1/mcp-servers/test", "/v1/mcp-servers/test", "auth"),
+    ("POST", "/v1/mcp-servers/{mid}/test", "/v1/mcp-servers/m_x/test", "auth"),
     # AUTH: mcp-servers
     # ------------------------------------------------------------------
     ("GET",    "/v1/mcp-servers",       "/v1/mcp-servers",     "auth"),

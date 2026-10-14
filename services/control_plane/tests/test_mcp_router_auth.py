@@ -107,12 +107,12 @@ def test_member_can_list_and_secret_never_shipped() -> None:
     assert "secret_ciphertext" not in servers[0]
 
 
-def test_create_rejects_http_url() -> None:
+def test_create_accepts_http_url() -> None:
     _use(ADMIN, rows=[])
     with TestClient(app) as c:
         r = c.post("/v1/mcp-servers", json={"name": "x", "description": "d", "url": "http://m"})
-    assert r.status_code == 400
-    assert r.json()["error"]["field"] == "url"
+    assert r.status_code == 200
+    assert r.json()["url"] == "http://m"
 
 
 # --- member-forbidden for mutating ops (T9-M4 gap) ----------------------------

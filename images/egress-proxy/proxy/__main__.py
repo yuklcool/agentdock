@@ -12,8 +12,8 @@ from proxy.server import ProxyServer
 def main() -> None:
     host = os.environ.get("EGRESS_LISTEN_HOST", "0.0.0.0")
     port = int(os.environ.get("EGRESS_LISTEN_PORT", "8888"))
-    policy = EgressPolicy.from_env(os.environ)
     try:
+        policy = EgressPolicy.from_env(os.environ)
         upstream = UpstreamPolicy.from_env(os.environ)
     except ValueError as e:
         # Refuse to start on a contradictory routing config rather than guess.

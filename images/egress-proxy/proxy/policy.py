@@ -1,6 +1,6 @@
 """Pure egress policy classifier for the filtering forward proxy.
 
-Block: RFC1918 private ranges, link-local (169.254/16, incl. cloud metadata),
+Default block: RFC1918 private ranges, link-local (169.254/16, incl. cloud metadata),
 loopback, and a configurable denylist of hostnames. Allow everything else.
 Hostnames are resolved; if ANY resolved IP is in a blocked range the host is
 blocked (DNS-rebinding defence). The resolver is injected so this stays a pure,
@@ -33,6 +33,7 @@ class Decision:
 @dataclass(frozen=True)
 class EgressPolicy:
     denylist: frozenset[str]  # lowercased hostnames
+    allowed_cidrs: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> EgressPolicy:
@@ -40,7 +41,11 @@ class EgressPolicy:
         hosts = frozenset(
             h.strip().lower() for h in raw.split(",") if h.strip()
         )
-        return cls(denylist=hosts)
+        networks = tuple(
+            ipaddress.ip_network(cidr, strict=False)
+            for cidr in env.get("EGRESS_ALLOW_CIDRS", "").replace(",", " ").split()
+        )
+        return cls(denylist=hosts, allowed_cidrs=networks)
 
 
 def _host_list(raw: str) -> frozenset[str]:
@@ -142,7 +147,7 @@ def _system_resolve(host: str) -> list[str]:
     return [str(info[4][0]) for info in infos]
 
 
-def _ip_reason(ip_str: str) -> str | None:
+def _ip_reason(ip_str: str, policy: EgressPolicy | None = None) -> str | None:
     """Return a block reason for an IP literal, or None if it is allowed."""
     ip = ipaddress.ip_address(ip_str)
     if ip.is_loopback:
@@ -150,6 +155,8 @@ def _ip_reason(ip_str: str) -> str | None:
     if ip.is_link_local:  # 169.254.0.0/16 and fe80::/10 — covers metadata endpoint
         return "link_local"
     if ip.is_private:     # 10/8, 172.16/12, 192.168/16, fc00::/7, etc.
+        if policy and any(ip in cidr for cidr in policy.allowed_cidrs):
+            return None
         return "private_range"
     return None
 
@@ -162,7 +169,7 @@ def classify(host: str, policy: EgressPolicy, *, resolve: Resolver = _system_res
     # If the host is already an IP literal, classify it directly.
     try:
         ipaddress.ip_address(host)
-        reason = _ip_reason(host)
+        reason = _ip_reason(host, policy)
         if reason is not None:
             return Decision(allowed=False, reason=reason)
         return Decision(allowed=True, reason="allowed")
@@ -177,7 +184,7 @@ def classify(host: str, policy: EgressPolicy, *, resolve: Resolver = _system_res
         return Decision(allowed=False, reason="dns_failure")
 
     for ip_str in ips:
-        reason = _ip_reason(ip_str)
+        reason = _ip_reason(ip_str, policy)
         if reason is not None:
             return Decision(allowed=False, reason=reason)
     return Decision(allowed=True, reason="allowed")

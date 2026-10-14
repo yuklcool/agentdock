@@ -1,8 +1,11 @@
 """Tenant MCP-server library CRUD. Reads are tenant-scoped; writes are
 admin-gated. Mirrors routers/skills.py. The auth secret is encrypted at rest and
 never returned (see mcp_service)."""
+
 from __future__ import annotations
 
+import asyncio
+import os
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -10,14 +13,19 @@ from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from control_plane.auth.crypto import encrypt_secret, load_key_from_env
+from agentcore.mcp_probe import probe_mcp_server
+from agentcore.models import ShimMcpServer
+from control_plane.auth.crypto import decrypt_secret, encrypt_secret, load_key_from_env
 from control_plane.auth.principal import Principal, require_admin, resolve_principal
 from control_plane.errors import api_error, not_found
 from control_plane.mcp_service import (
     build_mcp_row,
+    can_reuse_mcp_secret,
     mcp_detail_view,
     mcp_public_view,
+    validate_mcp_connection,
     validate_mcp_fields,
+    validate_mcp_secret,
 )
 from control_plane.models_db import mcp_servers
 from control_plane.skills_service import normalize_description
@@ -25,7 +33,116 @@ from control_plane.skills_service import normalize_description
 router = APIRouter(tags=["MCP Servers"])
 
 
+class MCPTestInput(BaseModel):
+    """Optional overrides for an existing server; drafts require a URL."""
+
+    url: str | None = Field(default=None, max_length=4096)
+    auth_type: str | None = None
+    auth_header_name: str | None = Field(default=None, max_length=200)
+    secret: str | None = Field(default=None, max_length=16384)
+
+
+async def _test_connection(
+    request: Request,
+    body: MCPTestInput,
+    existing: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    existing = existing or {}
+    url = body.url if body.url is not None else existing.get("url", "")
+    auth_type = body.auth_type if body.auth_type is not None else existing.get("auth_type", "none")
+    header = (
+        body.auth_header_name
+        if "auth_header_name" in body.model_fields_set
+        else existing.get("auth_header_name")
+    )
+    secret = body.secret
+    if secret is None and auth_type != "none" and existing.get("secret_ciphertext") is not None:
+        if not can_reuse_mcp_secret(
+            existing,
+            {
+                "url": url,
+                "auth_type": auth_type,
+                "auth_header_name": header,
+            },
+        ):
+            raise api_error(
+                400, "validation_error", "enter a new secret for changed endpoint/auth", "secret"
+            )
+        try:
+            secret = decrypt_secret(bytes(existing["secret_ciphertext"]), load_key_from_env())
+        except Exception:
+            raise api_error(
+                400, "secret_unavailable", "stored secret could not be decrypted", "secret"
+            ) from None
+    secret = secret or ""
+    validate_mcp_secret(secret)
+    validate_mcp_connection(
+        url=url,
+        auth_type=auth_type,
+        auth_header_name=header,
+        has_secret=bool(secret),
+    )
+    server = ShimMcpServer(
+        name=existing.get("name", "connection-test"),
+        url=url,
+        auth_type=auth_type,
+        auth_header_name=header or "",
+        secret=secret,
+    )
+    # Use the same filtering proxy as agents; never silently bypass it on failure.
+    proxy_url = os.environ.get("AGENTDOCK_MCP_TEST_PROXY") or "http://egress-proxy:8888"
+    if not hasattr(request.app.state, "mcp_test_limit"):
+        request.app.state.mcp_test_limit = asyncio.Semaphore(4)
+    limit = request.app.state.mcp_test_limit
+    try:
+        await asyncio.wait_for(limit.acquire(), timeout=0.1)
+    except TimeoutError:
+        raise api_error(429, "test_busy", "too many connection tests; try again shortly") from None
+    try:
+        return await probe_mcp_server(server, proxy_url=proxy_url)
+    finally:
+        limit.release()
+
+
+@router.post("/mcp-servers/test", response_description="MCP handshake/tool discovery diagnostics.")
+async def test_mcp_draft(
+    body: MCPTestInput,
+    request: Request,
+    principal: Principal = Depends(require_admin),
+) -> dict[str, Any]:
+    """Test without saving. Admin-only, tenant-scoped, secrets never returned."""
+    if principal.tenant_id is None:
+        raise api_error(403, "forbidden", "MCP servers are tenant-scoped")
+    return await _test_connection(request, body)
+
+
+@router.post(
+    "/mcp-servers/{mid}/test", response_description="Test saved/temporarily overridden MCP."
+)
+async def test_saved_mcp(
+    mid: str,
+    body: MCPTestInput,
+    request: Request,
+    principal: Principal = Depends(require_admin),
+) -> dict[str, Any]:
+    """Load only the caller's server. Overrides affect this test, never the DB."""
+    if principal.tenant_id is None:
+        raise api_error(403, "forbidden", "MCP servers are tenant-scoped")
+    async with request.app.state.session_factory() as session:
+        result = await session.execute(
+            select(*_ROW_COLS).where(
+                mcp_servers.c.id == mid,
+                mcp_servers.c.tenant_id == principal.tenant_id,
+            )
+        )
+        row = result.fetchone()
+    if row is None:
+        raise not_found("mcp server not found")
+    return await _test_connection(request, body, dict(row._mapping))
+
+
 # ---- response models (documentation only) -----------------------------------
+
 
 class MCPServerListResponse(BaseModel):
     """Envelope returned by ``GET /mcp-servers``."""
@@ -38,11 +155,18 @@ class MCPServerListResponse(BaseModel):
 
 # secret_ciphertext is included solely to derive secret_set; it is never returned.
 _ROW_COLS = [
-    mcp_servers.c.id, mcp_servers.c.tenant_id, mcp_servers.c.name,
-    mcp_servers.c.description, mcp_servers.c.url, mcp_servers.c.auth_type,
-    mcp_servers.c.auth_header_name, mcp_servers.c.secret_ciphertext,
-    mcp_servers.c.enabled, mcp_servers.c.created_by,
-    mcp_servers.c.created_at, mcp_servers.c.updated_at,
+    mcp_servers.c.id,
+    mcp_servers.c.tenant_id,
+    mcp_servers.c.name,
+    mcp_servers.c.description,
+    mcp_servers.c.url,
+    mcp_servers.c.auth_type,
+    mcp_servers.c.auth_header_name,
+    mcp_servers.c.secret_ciphertext,
+    mcp_servers.c.enabled,
+    mcp_servers.c.created_by,
+    mcp_servers.c.created_at,
+    mcp_servers.c.updated_at,
 ]
 
 
@@ -61,22 +185,33 @@ def parse_mcp_create(body: dict[str, Any]) -> dict[str, Any]:
     auth_type = body.get("auth_type", "none")
     auth_header_name = body.get("auth_header_name") or None
     secret = body.get("secret", "") or ""
+    validate_mcp_secret(secret)
     validate_mcp_fields(
-        name=name, description=description, url=url, auth_type=auth_type,
-        auth_header_name=auth_header_name, has_secret=bool(secret),
+        name=name,
+        description=description,
+        url=url,
+        auth_type=auth_type,
+        auth_header_name=auth_header_name,
+        has_secret=bool(secret),
     )
     return {
-        "name": name, "description": description, "url": url,
-        "auth_type": auth_type, "auth_header_name": auth_header_name,
-        "secret": secret, "enabled": bool(body.get("enabled", True)),
+        "name": name,
+        "description": description,
+        "url": url,
+        "auth_type": auth_type,
+        "auth_header_name": auth_header_name,
+        "secret": secret,
+        "enabled": bool(body.get("enabled", True)),
     }
 
 
 def apply_mcp_patch(existing: dict[str, Any], patch: dict[str, Any]) -> tuple[dict[str, Any], str]:
     """Merge a PATCH onto existing fields and re-validate. Returns (merged, directive)
     where directive is 'keep' | 'set' | 'clear' for the secret column."""
-    merged = {k: existing.get(k) for k in
-              ("name", "description", "url", "auth_type", "auth_header_name", "enabled")}
+    merged = {
+        k: existing.get(k)
+        for k in ("name", "description", "url", "auth_type", "auth_header_name", "enabled")
+    }
     for k in ("name", "description", "url", "auth_type", "auth_header_name", "enabled"):
         if k in patch:
             merged[k] = patch[k]
@@ -87,15 +222,27 @@ def apply_mcp_patch(existing: dict[str, Any], patch: dict[str, Any]) -> tuple[di
 
     directive = "keep"
     if "secret" in patch:
+        validate_mcp_secret(patch["secret"])
         directive = "set" if patch["secret"] else "clear"
-    will_have_secret = (
-        directive == "set"
-        or (directive == "keep" and existing.get("secret_ciphertext") is not None)
+    if (
+        directive == "keep"
+        and existing.get("secret_ciphertext") is not None
+        and merged["auth_type"] != "none"
+        and not can_reuse_mcp_secret(existing, merged)
+    ):
+        raise api_error(
+            400, "validation_error", "enter a new secret for changed endpoint/auth", "secret"
+        )
+    will_have_secret = directive == "set" or (
+        directive == "keep" and existing.get("secret_ciphertext") is not None
     )
     validate_mcp_fields(
-        name=str(merged["name"]), description=str(merged["description"]),
-        url=str(merged["url"]), auth_type=str(merged["auth_type"]),
-        auth_header_name=merged["auth_header_name"], has_secret=will_have_secret,
+        name=str(merged["name"]),
+        description=str(merged["description"]),
+        url=str(merged["url"]),
+        auth_type=str(merged["auth_type"]),
+        auth_header_name=merged["auth_header_name"],
+        has_secret=will_have_secret,
     )
     if directive == "set":
         merged["secret"] = patch["secret"]
@@ -118,7 +265,8 @@ async def list_mcp_servers(
     """
     async with request.app.state.session_factory() as session:
         result = await session.execute(
-            select(*_ROW_COLS).where(mcp_servers.c.tenant_id == principal.tenant_id)
+            select(*_ROW_COLS)
+            .where(mcp_servers.c.tenant_id == principal.tenant_id)
             .order_by(mcp_servers.c.name)
         )
         rows = [dict(r._mapping) for r in result.fetchall()]
@@ -173,10 +321,15 @@ async def create_mcp_server(
         raise api_error(403, "forbidden", "MCP servers are tenant-scoped")
     fields = parse_mcp_create(await request.json())
     row = build_mcp_row(
-        tenant_id=principal.tenant_id, created_by=principal.user_id,
-        name=fields["name"], description=fields["description"], url=fields["url"],
-        auth_type=fields["auth_type"], auth_header_name=fields["auth_header_name"],
-        secret=fields["secret"], enabled=fields["enabled"],
+        tenant_id=principal.tenant_id,
+        created_by=principal.user_id,
+        name=fields["name"],
+        description=fields["description"],
+        url=fields["url"],
+        auth_type=fields["auth_type"],
+        auth_header_name=fields["auth_header_name"],
+        secret=fields["secret"],
+        enabled=fields["enabled"],
         master_key=load_key_from_env() if fields["secret"] else None,
     )
     async with request.app.state.session_factory() as session:
@@ -236,22 +389,25 @@ async def patch_mcp_server(
             )
             if dupe.fetchone() is not None:
                 raise api_error(
-                    409, "conflict",
-                    f"an mcp server named {merged['name']!r} already exists", "name",
+                    409,
+                    "conflict",
+                    f"an mcp server named {merged['name']!r} already exists",
+                    "name",
                 )
         values: dict[str, Any] = {
-            "name": merged["name"], "description": merged["description"],
-            "url": merged["url"], "auth_type": merged["auth_type"],
-            "auth_header_name": merged["auth_header_name"], "enabled": merged["enabled"],
+            "name": merged["name"],
+            "description": merged["description"],
+            "url": merged["url"],
+            "auth_type": merged["auth_type"],
+            "auth_header_name": merged["auth_header_name"],
+            "enabled": merged["enabled"],
             "updated_at": datetime.now(UTC),
         }
         if directive == "set":
             values["secret_ciphertext"] = encrypt_secret(merged["secret"], load_key_from_env())
         elif directive == "clear":
             values["secret_ciphertext"] = None
-        await session.execute(
-            mcp_servers.update().where(mcp_servers.c.id == mid).values(**values)
-        )
+        await session.execute(mcp_servers.update().where(mcp_servers.c.id == mid).values(**values))
         await session.commit()
         existing.update(values)
     return mcp_detail_view(existing)

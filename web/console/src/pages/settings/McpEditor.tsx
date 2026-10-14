@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useSaveMcpServer, fetchMcpServer } from "../../api/queries";
+import { useSaveMcpServer, fetchMcpServer, testMcpServer } from "../../api/queries";
+import { McpTestResult } from "../../components/McpTestResult";
 import { useToast } from "../../components/Toast";
 import { ApiError } from "../../api/client";
 import { Button, Field, Note, Dropdown } from "../../ui";
 import { Input } from "../../ui/inputs";
 import { Icons } from "../../ui/Icon";
 import { slugNameError } from "../../lib/validation";
-import type { McpAuthType } from "../../api/types";
+import type { McpAuthType, McpConnectionTestResult } from "../../api/types";
 
 type Draft = {
   id?: string;
@@ -29,10 +30,14 @@ const EMPTY: Draft = {
 
 function urlValidationError(url: string): string | null {
   if (!url) return null;
-  if (!url.startsWith("https://") && !url.startsWith("http://")) {
-    return "URL must start with http:// or https://";
-  }
-  return null;
+  try {
+    const parsed = new URL(url);
+    const hasControl = Array.from(url).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
+    if (["https:", "http:"].includes(parsed.protocol) && parsed.hostname &&
+      /^https?:\/\//i.test(url) && !url.includes("\\") &&
+      !parsed.username && !parsed.password && !parsed.hash && !/\s/.test(url) && !hasControl) return null;
+  } catch { /* show field error */ }
+  return "URL must be a valid http:// or https:// endpoint";
 }
 
 export default function McpEditor() {
@@ -45,10 +50,25 @@ export default function McpEditor() {
   const [loadError, setLoadError] = useState(false);
   // secret is kept separate from Draft — it's write-only, never pre-filled
   const [secret, setSecret] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<McpConnectionTestResult | null>(null);
+  const testGeneration = useRef(0);
+
+  useEffect(() => {
+    setTestResult(null);
+    testGeneration.current += 1;
+    return () => { testGeneration.current += 1; };
+  }, [draft?.id, draft?.url, draft?.auth_type, draft?.auth_header_name, draft?.secret_set, secret]);
 
   // Edit: fetch the MCP server once to pre-fill non-secret fields
   useEffect(() => {
-    if (!id || draft) return;
+    setSecret("");
+    setLoadError(false);
+    if (!id) {
+      setDraft({ ...EMPTY });
+      return;
+    }
+    setDraft(null);
     let alive = true;
     fetchMcpServer(id)
       .then((s) => {
@@ -66,7 +86,7 @@ export default function McpEditor() {
       })
       .catch(() => { if (alive) setLoadError(true); });
     return () => { alive = false; };
-  }, [id, draft]);
+  }, [id]);
 
   function back() { navigate("/settings/mcp"); }
 
@@ -99,8 +119,10 @@ export default function McpEditor() {
   const invalidUrl = urlValidationError(draft.url);
   const needsSecret = draft.auth_type !== "none";
   // On create, secret is required when auth_type !== none; on edit it can be omitted to keep existing
-  const secretMissing = !isEdit && needsSecret && !secret.trim();
-  const busy = save.isPending;
+  const secretMissing = needsSecret && !secret.trim() && !draft.secret_set;
+  const busy = save.isPending || testing;
+  const canTest = !!draft.url && !invalidUrl && !secretMissing &&
+    (draft.auth_type !== "header" || !!draft.auth_header_name.trim());
   const canSave =
     !!draft.name && !invalidName &&
     !!draft.url && !invalidUrl &&
@@ -130,6 +152,27 @@ export default function McpEditor() {
     }
   }
 
+  async function onTest() {
+    if (!draft || !canTest || busy) return;
+    const generation = ++testGeneration.current;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await testMcpServer({
+        id: draft.id, url: draft.url, auth_type: draft.auth_type,
+        auth_header_name: draft.auth_type === "header" ? draft.auth_header_name.trim() : null,
+        ...(secret.trim() ? { secret: secret.trim() } : {}),
+      });
+      if (generation === testGeneration.current) setTestResult(result);
+    } catch (err) {
+      if (generation === testGeneration.current) {
+        toast.error("连接测试失败", err instanceof ApiError ? err.message : undefined);
+      }
+    } finally {
+      setTesting(false);
+    }
+  }
+
   async function onClearSecret() {
     if (!draft?.id) return;
     try {
@@ -150,7 +193,7 @@ export default function McpEditor() {
     }
   }
 
-  const saveLabel = busy ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save server" : "Create server");
+  const saveLabel = save.isPending ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save server" : "Create server");
 
   const secretPlaceholder = isEdit
     ? (draft.secret_set ? "•••••••• (configured — leave blank to keep)" : "enter a token")
@@ -196,7 +239,7 @@ export default function McpEditor() {
             value={draft.name}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
             placeholder="linear-mcp"
-            disabled={isEdit}
+            disabled={isEdit || busy}
             aria-invalid={!!invalidName}
           />
           {invalidName && <span className="hint" style={{ color: "var(--err-700)" }}>{invalidName}</span>}
@@ -208,6 +251,7 @@ export default function McpEditor() {
             id="mcp-desc"
             className="fluid-w"
             aria-label="Description"
+            disabled={busy}
             value={draft.description}
             onChange={(e) => setDraft({ ...draft, description: e.target.value })}
             placeholder="Linear project management tools"
@@ -220,6 +264,7 @@ export default function McpEditor() {
             id="mcp-url"
             className="fluid-w"
             aria-label="URL"
+            disabled={busy}
             value={draft.url}
             onChange={(e) => setDraft({ ...draft, url: e.target.value })}
             placeholder="https://mcp.example.com/mcp"
@@ -233,6 +278,7 @@ export default function McpEditor() {
           <Dropdown
             id="mcp-auth"
             aria-label="Authentication type"
+            disabled={busy}
             value={draft.auth_type}
             onChange={(v) => setDraft({ ...draft, auth_type: v as McpAuthType })}
             options={[
@@ -250,6 +296,7 @@ export default function McpEditor() {
               id="mcp-header-name"
               className="fluid-w"
               aria-label="Header name"
+              disabled={busy}
               value={draft.auth_header_name}
               onChange={(e) => setDraft({ ...draft, auth_header_name: e.target.value })}
               placeholder="X-Api-Key"
@@ -270,6 +317,7 @@ export default function McpEditor() {
                 type="password"
                 className="fluid-w"
                 aria-label="Secret"
+                disabled={busy}
                 value={secret}
                 onChange={(e) => setSecret(e.target.value)}
                 placeholder={secretPlaceholder}
@@ -288,6 +336,7 @@ export default function McpEditor() {
             </div>
           </Field>
         )}
+        {testResult && <McpTestResult result={testResult} />}
       </div>
 
       {/* Footer actions */}
@@ -297,6 +346,9 @@ export default function McpEditor() {
         background: "var(--surface)",
       }}>
         <Button variant="secondary" size="md" onClick={back}>Cancel</Button>
+        <Button variant="secondary" size="md" onClick={onTest} disabled={!canTest || busy}>
+          {testing ? "测试中…" : "测试连接"}
+        </Button>
         <Button variant="primary" size="md" onClick={onSave} disabled={!canSave || busy}>{saveLabel}</Button>
       </div>
     </div>
