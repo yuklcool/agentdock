@@ -9,10 +9,11 @@ from typing import Annotated
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Path, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, HttpUrl, TypeAdapter, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import control_plane.tables as t
+from agentcore.llm.endpoints import normalize_base_url
 from control_plane.anthropic_oauth import build_authorize_url, exchange_code, gen_pkce
 from control_plane.audit import audit
 from control_plane.auth.crypto import decrypt_secret, load_key_from_env
@@ -47,27 +48,14 @@ async def _session(request: Request) -> AsyncIterator[AsyncSession]:
 class CredentialEndpoint(BaseModel):
     base_url: str | None = Field(
         default=None, max_length=2048,
-        description="Optional HTTP(S) API base URL for Nanobot. Null uses the provider default.",
+        description="Optional model API base URL. OpenAI applies to api, vanilla, opencode, "
+        "codex and nanobot; Anthropic applies to nanobot. Null uses provider defaults.",
     )
 
     @field_validator("base_url", mode="before")
     @classmethod
     def validate_base_url(cls, value: object) -> str | None:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            raise ValueError("Base URL must be an HTTP(S) URL")
-        value = value.strip()
-        if not value:
-            return None
-        if any(c.isspace() or ord(c) < 32 for c in value) or "\\" in value:
-            raise ValueError("Base URL cannot contain whitespace or backslashes")
-        url = TypeAdapter(HttpUrl).validate_python(value)
-        if url.username is not None or url.password is not None:
-            raise ValueError("Keep credentials in the API key field, not the Base URL")
-        if url.query is not None or url.fragment is not None:
-            raise ValueError("Base URL cannot contain query parameters or a fragment")
-        return str(url).rstrip("/")
+        return normalize_base_url(value)
 
 
 class SetCredential(CredentialEndpoint):

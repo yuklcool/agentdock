@@ -22,6 +22,7 @@ from agentcore.drivers.base import (
 )
 from agentcore.drivers.session_state import read_session_state, write_session_state
 from agentcore.llm.base import LLMClient
+from agentcore.llm.endpoints import api_key_base_url
 from agentcore.llm.router import LLMRouter
 from agentcore.models import (
     AgentConfig,
@@ -93,9 +94,11 @@ class ApiDriver:
         self._llm = llm
         self._router = router
 
-    def _route(self, model: str) -> tuple[LLMClient, str]:
+    def _route(self, model: str, *, base_url: str | None = None) -> tuple[LLMClient, str]:
         if self._router is not None:
-            return self._router.route(model)
+            if base_url is None:
+                return self._router.route(model)
+            return self._router.route(model, base_url=base_url)
         assert self._llm is not None
         return self._llm, model
 
@@ -120,7 +123,9 @@ class ApiDriver:
         await emit("task_started", {"driver": self.name, "model": config.model})
 
         try:
-            client, wire_model = self._route(config.model)
+            client, wire_model = self._route(
+                config.model, base_url=api_key_base_url(credential_kind, credential_meta),
+            )
         except ValueError as e:
             await emit(
                 "status_change",

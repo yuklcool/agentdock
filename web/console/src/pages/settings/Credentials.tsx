@@ -193,7 +193,7 @@ export default function Credentials() {
             </span>
           </div>
           <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>
-            Manage provider keys and Nanobot API endpoints. Keys are stored encrypted and never returned.
+            Manage provider keys and model API endpoints. Keys are stored encrypted and never returned.
           </div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
@@ -236,12 +236,12 @@ export default function Credentials() {
             </span>
             <div className="cred-hero-title">{editing ? "Edit Base URL" : "Add an API key"}</div>
             <p className="cred-hero-lede">
-              {editing ? `Update the Nanobot endpoint for ${editing.provider}. Your saved API key is kept.` : "Connect a provider key so tasks can call the model directly."}
+              {editing ? `Update the API endpoint for ${editing.provider}. Your saved API key is kept.` : "Connect a provider key so tasks can call the model directly."}
             </p>
             <ul className="cred-hero-points">
               <li><Icons.Check style={{ width: 14, height: 14 }} /> Encrypted at rest, never returned</li>
               <li><Icons.Check style={{ width: 14, height: 14 }} /> Secrets are never shown in full</li>
-              <li><Icons.Check style={{ width: 14, height: 14 }} /> {editing ? "Applies to the next Nanobot task" : "Replaces the current key for the provider"}</li>
+              <li><Icons.Check style={{ width: 14, height: 14 }} /> {editing ? "Applies to the next task using this API-key endpoint" : "Replaces the current key for the provider"}</li>
             </ul>
           </aside>
 
@@ -276,7 +276,9 @@ export default function Credentials() {
               {supportsBaseUrl && <Field
                 label="Base URL (optional)"
                 htmlFor="base-url"
-                hint="For Nanobot tasks using this provider in this workspace. Leave blank for the default endpoint. An instance API address override takes priority."
+                hint={provider === "openai"
+                  ? "For api, barebones, OpenCode, Codex and Nanobot using an OpenAI model. Enter the base prefix (for example /v1), not /chat/completions or /responses. Leave blank for provider defaults."
+                  : "For Nanobot tasks using this Anthropic credential. Leave blank for the default endpoint. An instance API address override takes priority."}
               >
                 <Input
                   id="base-url"
@@ -286,6 +288,15 @@ export default function Credentials() {
                   onChange={(e) => setBaseUrl(e.target.value)}
                 />
               </Field>}
+              {provider === "opencode" && <div className="hint">
+                OpenCode here means the Zen / Go provider. For a custom OpenAI-compatible gateway,
+                select OpenAI here and an OpenAI model in the instance configuration.
+              </div>}
+              {provider === "openai" && <div className="hint">
+                Codex requires a Responses API endpoint. api, barebones, OpenCode and Nanobot
+                use Chat Completions for custom endpoints. A configured endpoint uses its API key
+                instead of ChatGPT subscription authentication.
+              </div>}
               <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                 <Button variant="primary" disabled={(!editing && !apiKey) || setCred.isPending || updateEndpoint.isPending} onClick={onSave}>
                   <Icons.Check w={15} /> Save credential
@@ -452,7 +463,7 @@ export default function Credentials() {
               <th>Provider</th>
               <th>Method</th>
               <th>Identifier</th>
-              <th>Nanobot Base URL</th>
+              <th>API Base URL</th>
               <th>Status</th>
               <th>Added by</th>
               <th style={{ width: 200, textAlign: "right" }} />
