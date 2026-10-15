@@ -56,6 +56,25 @@ jobs:
           name: operations-browser-results
           path: web/console/test-results/
 
+  model-endpoint-cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pip install -e 'packages/agentcore[dev]'
+      - name: Install image-pinned model CLIs
+        run: npm install --prefix /tmp/agentdock-endpoint-clis --no-audit --no-fund opencode-ai@1.18.32 @openai/codex@0.157.1
+      - name: Native custom endpoint and API key checks
+        env:
+          AGENTDOCK_TEST_CLI_DIR: /tmp/agentdock-endpoint-clis/node_modules/.bin
+        run: pytest -q packages/agentcore/tests/drivers/test_custom_endpoint_cli_live.py
+
   integration:
     # Broader legacy service integration is still available on manual runs.
     # Automatic Nanobot/Postgres/backup integration lives in nanobot.yml.

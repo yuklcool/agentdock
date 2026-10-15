@@ -73,6 +73,25 @@ describe("Credentials", () => {
     expect(screen.getAllByText(/subscription/i).length).toBeGreaterThan(0);
   });
 
+  it("explains all OpenAI endpoint drivers and saves their shared credential", async () => {
+    server.use(http.get("/v1/credentials", () => HttpResponse.json({ credentials: [] })));
+    let body: unknown;
+    server.use(http.post("/v1/credentials", async ({ request }) => {
+      body = await request.json();
+      return HttpResponse.json({ id: "cred_1", provider: "openai", last4: "test" });
+    }));
+    renderWithProviders(<Credentials />);
+    await userEvent.click(await screen.findByRole("button", { name: /Add API key/i }));
+    await userEvent.click(screen.getByLabelText("Provider"));
+    await userEvent.click(screen.getByRole("option", { name: "OpenAI" }));
+    expect(screen.getByText(/For api, barebones, OpenCode, Codex and Nanobot/)).toBeInTheDocument();
+    expect(screen.getByText(/Codex requires a Responses API endpoint/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(/API key/i), "gateway-key-test");
+    await userEvent.type(screen.getByLabelText(/Base URL/i), "https://gateway.example/api");
+    await userEvent.click(screen.getByRole("button", { name: /Save credential/i }));
+    await waitFor(() => expect(body).toEqual({ provider: "openai", api_key: "gateway-key-test", base_url: "https://gateway.example/api" }));
+  });
+
   it("starts the ChatGPT device flow and shows the user code", async () => {
     server.use(http.get("/v1/credentials", () => HttpResponse.json({ credentials: [] })));
     server.use(http.post("/v1/credentials/oauth/openai/start", () => HttpResponse.json({

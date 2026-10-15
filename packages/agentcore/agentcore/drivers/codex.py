@@ -79,9 +79,11 @@ from agentcore.drivers.codex_spare import SparePool, SpareRecipe, fingerprint
 from agentcore.drivers.mcp_config import (
     codex_mcp_env,
     render_codex_mcp_toml,
+    toml_basic_string,
 )
 from agentcore.drivers.session_state import read_session_state, write_session_state
 from agentcore.drivers.skills_md import write_skills
+from agentcore.llm.endpoints import api_key_base_url, normalize_base_url
 from agentcore.models import (
     AgentConfig,
     ResolvedLimits,
@@ -274,31 +276,64 @@ def tool_args(tools: Iterable[str]) -> list[str]:
     return out
 
 
-def build_app_server_command(*, tools: Iterable[str] = CODEX_DEFAULT_TOOLS) -> list[str]:
+CUSTOM_OPENAI_PROVIDER = "agentdock-openai"
+
+
+def endpoint_args(base_url: str | None) -> list[str]:
+    """Use Codex's Responses provider; the key stays in the child environment."""
+    endpoint = normalize_base_url(base_url)
+    if endpoint is None:
+        return []
+    settings = {
+        "model_provider": CUSTOM_OPENAI_PROVIDER,
+        f"model_providers.{CUSTOM_OPENAI_PROVIDER}.name": "AgentDock OpenAI-compatible",
+        f"model_providers.{CUSTOM_OPENAI_PROVIDER}.base_url": endpoint,
+        f"model_providers.{CUSTOM_OPENAI_PROVIDER}.env_key": "CODEX_API_KEY",
+        f"model_providers.{CUSTOM_OPENAI_PROVIDER}.wire_api": "responses",
+    }
+    args: list[str] = []
+    for key, value in settings.items():
+        args += ["-c", f"{key}={toml_basic_string(value)}"]
+    args += ["-c", f"model_providers.{CUSTOM_OPENAI_PROVIDER}.requires_openai_auth=false",
+             "-c", f"model_providers.{CUSTOM_OPENAI_PROVIDER}.supports_websockets=false"]
+    return args
+
+
+def build_app_server_command(
+    *, tools: Iterable[str] = CODEX_DEFAULT_TOOLS, base_url: str | None = None,
+) -> list[str]:
     """``codex app-server`` with the side-channel and tool overrides.
 
     Thread and turn settings travel in the JSON-RPC requests instead."""
-    return ["codex", "app-server", *_side_channel_args(), *tool_args(tools)]
+    return ["codex", "app-server", *_side_channel_args(), *tool_args(tools),
+            *endpoint_args(base_url)]
 
 
 _THREAD_ACCESS = {"approvalPolicy": "never", "sandbox": "danger-full-access"}
 
 
-def thread_start_params(*, workspace: str, model: str, instructions: str) -> dict[str, Any]:
+def thread_start_params(
+    *, workspace: str, model: str, instructions: str, model_provider: str | None = None,
+) -> dict[str, Any]:
     params: dict[str, Any] = {"model": model, "cwd": workspace, "ephemeral": False,
                               **_THREAD_ACCESS}
     if instructions:
         params["developerInstructions"] = instructions
+    if model_provider is not None:
+        params["modelProvider"] = model_provider
     return params
 
 
 def thread_resume_params(
-    *, thread_id: str, workspace: str, model: str, instructions: str
+    *, thread_id: str, workspace: str, model: str, instructions: str,
+    model_provider: str | None = None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"threadId": thread_id, "model": model, "cwd": workspace,
                               **_THREAD_ACCESS}
     if instructions:
         params["developerInstructions"] = instructions
+    if model_provider is not None:
+        params["modelProvider"] = model_provider
     return params
 
 
@@ -787,9 +822,12 @@ class CodexDriver:
         instructions = developer_instructions(
             config.system_prompt or "", progress_updates=config.progress_updates
         )
-        cmd = build_app_server_command(tools=config.tools)
+        base_url = api_key_base_url(credential_kind, credential_meta)
+        custom_provider = CUSTOM_OPENAI_PROVIDER if base_url else None
+        cmd = build_app_server_command(tools=config.tools, base_url=base_url)
         start_params = thread_start_params(workspace=workspace, model=model,
-                                           instructions=instructions)
+                                           instructions=instructions,
+                                           model_provider=custom_provider)
         recipe = SpareRecipe(
             cmd=cmd, cwd=workspace, env=child_env, thread_params=start_params,
             fingerprint=fingerprint(
@@ -831,7 +869,8 @@ class CodexDriver:
                 await bounded(client.request(
                     "thread/resume",
                     thread_resume_params(thread_id=resume_thread_id, workspace=workspace,
-                                         model=model, instructions=instructions),
+                                         model=model, instructions=instructions,
+                                         model_provider=custom_provider or "openai"),
                     timeout=THREAD_REQUEST_TIMEOUT_SECONDS,
                 ))
                 thread_id = resume_thread_id

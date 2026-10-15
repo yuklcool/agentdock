@@ -45,6 +45,7 @@ from agentcore.drivers.cli_stream import classify_json_line, log_payload
 from agentcore.drivers.mcp_config import render_opencode_mcp
 from agentcore.drivers.session_state import read_session_state, write_session_state
 from agentcore.drivers.skills_md import write_skills
+from agentcore.llm.endpoints import api_key_base_url, normalize_base_url
 from agentcore.models import (
     AgentConfig,
     ResolvedLimits,
@@ -340,6 +341,49 @@ def opencode_config_path(workspace: str) -> str:
     return str(Path(cfg) / "opencode" / "opencode.json")
 
 
+CUSTOM_OPENAI_PROVIDER = "agentdock-openai"
+
+
+def write_opencode_endpoint(workspace: str, model: str, base_url: str | None) -> str:
+    """Manage only our compatible provider, preserving MCP/instructions/user config.
+
+    A distinct provider avoids OpenCode's native OpenAI/ChatGPT OAuth loader and
+    uses Chat Completions explicitly. Never persist a plaintext API key.
+    """
+    endpoint = normalize_base_url(base_url)
+    path = Path(opencode_config_path(workspace))
+    existing = json.loads(path.read_text()) if path.exists() else {}
+    if not isinstance(existing, dict) or not isinstance(existing.get("provider", {}), dict):
+        raise ValueError("invalid OpenCode provider configuration")
+    providers = dict(existing.get("provider", {}))
+    if endpoint:
+        if provider_for_model(model) != "openai":
+            raise ValueError("custom OpenAI endpoints require an OpenAI model")
+        wire_model = model.removeprefix("openai/")
+        providers[CUSTOM_OPENAI_PROVIDER] = {
+            "npm": "@ai-sdk/openai-compatible", "name": "AgentDock OpenAI-compatible",
+            "options": {"baseURL": endpoint, "apiKey": "{env:OPENAI_API_KEY}"},
+            "models": {wire_model: {"name": wire_model}},
+        }
+        selected_model = f"{CUSTOM_OPENAI_PROVIDER}/{wire_model}"
+    else:
+        if CUSTOM_OPENAI_PROVIDER not in providers:
+            return model_ref(model)
+        providers.pop(CUSTOM_OPENAI_PROVIDER)
+        selected_model = model_ref(model)
+    if providers:
+        existing["provider"] = providers
+    else:
+        existing.pop("provider", None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".endpoint.tmp")
+    temporary.unlink(missing_ok=True)
+    temporary.write_text(json.dumps(existing))
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+    return selected_model
+
+
 def write_opencode_mcp(workspace: str, servers: list[ShimMcpServer]) -> int:
     """Rewrite the ``mcp`` block in opencode.json. Returns count written.
 
@@ -547,10 +591,6 @@ class OpencodeDriver:
             )
 
         provider = provider_for_model(config.model)
-        cmd = build_command(
-            workspace=workspace, model_ref=model_ref(config.model), prompt=prompt,
-            resume_session_id=resume_session_id, effort=config.effort,
-        )
         child_env = build_env(
             sandbox.build_child_env(env),
             provider=provider,
@@ -563,6 +603,26 @@ class OpencodeDriver:
         for path in xdg.values():
             sandbox.ensure_agent_dir(path)
         child_env.update(xdg)
+
+        # Endpoint configuration is required, not a best-effort enhancement:
+        # failures must never send this key to the default official endpoint.
+        try:
+            selected_model = write_opencode_endpoint(
+                workspace, config.model, api_key_base_url(credential_kind, credential_meta),
+            )
+            if os.path.exists(opencode_config_path(workspace)):
+                sandbox.chown_to_agent(opencode_config_path(workspace))
+        except Exception:
+            await emit("status_change", {
+                "from": "running", "to": "failed", "result": None,
+                "error": {"code": "opencode_endpoint_config_error",
+                          "message": "Could not configure the model API endpoint"},
+            })
+            return TaskResult(success=False, reason="opencode_endpoint_config_error")
+        cmd = build_command(
+            workspace=workspace, model_ref=selected_model, prompt=prompt,
+            resume_session_id=resume_session_id, effort=config.effort,
+        )
 
         # Materialize opencode skills into the discovery dir (best-effort: a
         # failure must never change the task outcome — skills are an enhancement).

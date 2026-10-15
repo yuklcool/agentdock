@@ -611,7 +611,13 @@ async def resolve_task_credential(
             )
         ).mappings().all()
     ]
-    chosen = pick_provider_credential(
+    # An explicit OpenAI API endpoint selects the matching API-key credential,
+    # even when this tenant also has ChatGPT subscription auth. Never send a
+    # subscription token to a tenant-defined gateway or silently ignore its URL.
+    custom_openai_endpoint = lookup_provider == "openai" and config.driver in {
+        "api", "vanilla", "opencode", "codex", "nanobot",
+    } and any(r["auth_method"] == "api_key" and r.get("base_url") for r in cred_rows)
+    chosen = "api_key" if custom_openai_endpoint else pick_provider_credential(
         cred_rows,
         kill_switch=settings.oauth_subscription_kill_switch,
         subscription_usable=driver_can_use_subscription(config.driver, lookup_provider),
@@ -651,7 +657,9 @@ async def resolve_task_credential(
     if chosen == "api_key":
         api_row = next(r for r in cred_rows if r["auth_method"] == "api_key")
         credential = decrypt_row(api_row, load_key_from_env())
-        if config.driver == "nanobot" and api_row.get("base_url"):
+        if api_row.get("base_url") and (
+            config.driver == "nanobot" or custom_openai_endpoint
+        ):
             credential_meta["base_url"] = api_row["base_url"]
         credential_kind = "api_key"
         credential_used = "api_key"

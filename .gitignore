@@ -51,6 +51,7 @@ deploy/.env
 /docs/*
 !/docs/NANOBOT.md
 !/docs/MCP.md
+!/docs/MODEL_ENDPOINTS.md
 
 # Local Claude Code config
 .claude/

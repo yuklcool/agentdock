@@ -13,6 +13,7 @@ from __future__ import annotations
 from agentcore.llm.anthropic import DEFAULT_BASE_URL as ANTHROPIC_DEFAULT_BASE_URL
 from agentcore.llm.anthropic import AnthropicClient
 from agentcore.llm.base import LLMClient
+from agentcore.llm.endpoints import normalize_base_url
 from agentcore.llm.openai_compat import DEFAULT_BASE_URL as OPENAI_DEFAULT_BASE_URL
 from agentcore.llm.openai_compat import OpenAICompatClient
 
@@ -48,12 +49,19 @@ class LLMRouter:
             base_url=f"{opencode_go_base_url.rstrip('/')}/v1"
         )
 
-    def route(self, model: str) -> tuple[LLMClient, str]:
+    def route(self, model: str, *, base_url: str | None = None) -> tuple[LLMClient, str]:
         """Return (client, wire model id) for a catalog model id.
 
         Raises ValueError for ids no table matches — config validation blocks
         these at submit time, so this is a defense-in-depth guard.
         """
+        if base_url:
+            # A per-request client avoids changing the shared router used by
+            # concurrent tenants. Compatible gateways use chat/completions.
+            wire_model = model.removeprefix("openai/")
+            if not wire_model.startswith(OPENAI_MODEL_PREFIXES):
+                raise ValueError("custom OpenAI endpoints require an OpenAI model")
+            return OpenAICompatClient(base_url=normalize_base_url(base_url) or ""), wire_model
         if model.startswith(_GO_PREFIX):
             name = model[len(_GO_PREFIX):]
             if name.startswith(GO_ANTHROPIC_FAMILIES):

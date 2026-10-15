@@ -3,6 +3,7 @@
 Uses a fake AsyncSession that returns canned credential rows and a monkeypatched
 master key — no DB, no docker.
 """
+
 from __future__ import annotations
 
 import os
@@ -54,9 +55,7 @@ class FakeSession:
         # The credential select filters on tenant_id and provider; pull the
         # provider literal out of the compiled statement's params.
         params = stmt.compile().params
-        provider = next(
-            v for k, v in params.items() if k.startswith("provider")
-        )
+        provider = next(v for k, v in params.items() if k.startswith("provider"))
         self.queried_providers.append(provider)
         return FakeResult(self.rows_by_provider.get(provider, []))
 
@@ -67,8 +66,11 @@ def _config(model: str) -> AgentConfig:
 
 def _key_row(provider: str, api_key: str) -> dict:
     return build_credential_row(
-        tenant_id="ten_1", provider=provider, api_key=api_key,
-        created_by=None, master_key=MASTER,
+        tenant_id="ten_1",
+        provider=provider,
+        api_key=api_key,
+        created_by=None,
+        master_key=MASTER,
     )
 
 
@@ -80,8 +82,11 @@ def _master_key(monkeypatch: pytest.MonkeyPatch):
 async def test_free_zen_without_key_is_keyless() -> None:
     session = FakeSession({})
     cred, kind, meta, used = await resolve_task_credential(
-        session, settings=SETTINGS, tenant_id="ten_1",
-        config=_config("opencode/deepseek-v4-flash-free"), timeout_seconds=600,
+        session,
+        settings=SETTINGS,
+        tenant_id="ten_1",
+        config=_config("opencode/deepseek-v4-flash-free"),
+        timeout_seconds=600,
     )
     assert (cred, kind, meta, used) == ("", "api_key", {}, "keyless")
 
@@ -90,8 +95,11 @@ async def test_free_zen_with_stored_key_injects_it() -> None:
     # A stored opencode key is injected even for free models (lifts rate limits).
     session = FakeSession({"opencode": [_key_row("opencode", "oc-live-1234")]})
     cred, kind, _meta, used = await resolve_task_credential(
-        session, settings=SETTINGS, tenant_id="ten_1",
-        config=_config("opencode/deepseek-v4-flash-free"), timeout_seconds=600,
+        session,
+        settings=SETTINGS,
+        tenant_id="ten_1",
+        config=_config("opencode/deepseek-v4-flash-free"),
+        timeout_seconds=600,
     )
     assert cred == "oc-live-1234"
     assert kind == "api_key"
@@ -102,8 +110,11 @@ async def test_go_model_without_key_rejected() -> None:
     session = FakeSession({})
     with pytest.raises(APIError) as exc:
         await resolve_task_credential(
-            session, settings=SETTINGS, tenant_id="ten_1",
-            config=_config("opencode-go/glm-5.2"), timeout_seconds=600,
+            session,
+            settings=SETTINGS,
+            tenant_id="ten_1",
+            config=_config("opencode-go/glm-5.2"),
+            timeout_seconds=600,
         )
     assert exc.value.code == "no_credential"
 
@@ -112,8 +123,11 @@ async def test_go_model_uses_the_opencode_credential_row() -> None:
     # opencode-go models look up the row stored under provider "opencode".
     session = FakeSession({"opencode": [_key_row("opencode", "oc-live-1234")]})
     cred, kind, _meta, used = await resolve_task_credential(
-        session, settings=SETTINGS, tenant_id="ten_1",
-        config=_config("opencode-go/glm-5.2"), timeout_seconds=600,
+        session,
+        settings=SETTINGS,
+        tenant_id="ten_1",
+        config=_config("opencode-go/glm-5.2"),
+        timeout_seconds=600,
     )
     assert cred == "oc-live-1234"
     assert kind == "api_key"
@@ -125,8 +139,11 @@ async def test_paid_zen_without_key_rejected() -> None:
     session = FakeSession({})
     with pytest.raises(APIError) as exc:
         await resolve_task_credential(
-            session, settings=SETTINGS, tenant_id="ten_1",
-            config=_config("opencode/kimi-k2"), timeout_seconds=600,
+            session,
+            settings=SETTINGS,
+            tenant_id="ten_1",
+            config=_config("opencode/kimi-k2"),
+            timeout_seconds=600,
         )
     assert exc.value.code == "no_credential"
 
@@ -134,7 +151,9 @@ async def test_paid_zen_without_key_rejected() -> None:
 async def test_anthropic_behavior_unchanged() -> None:
     session = FakeSession({"anthropic": [_key_row("anthropic", "sk-ant-9999")]})
     cred, kind, _meta, used = await resolve_task_credential(
-        session, settings=SETTINGS, tenant_id="ten_1",
+        session,
+        settings=SETTINGS,
+        tenant_id="ten_1",
         config=AgentConfig(driver="vanilla", model="claude-opus-4-7", tools=["bash"]),
         timeout_seconds=600,
     )
@@ -142,14 +161,68 @@ async def test_anthropic_behavior_unchanged() -> None:
     assert used == "api_key"
 
 
-@pytest.mark.parametrize("driver", ["nanobot", "vanilla"])
-async def test_custom_endpoint_follows_selected_nanobot_credential(driver):
+@pytest.mark.parametrize("driver", ["nanobot", "vanilla", "api", "opencode", "codex"])
+async def test_custom_endpoint_follows_selected_openai_credential(driver):
     row = _key_row("openai", "test-key-1234")
     row["base_url"] = "https://proxy.example/v1"
     session = FakeSession({"openai": [row]})
     cred, kind, meta, used = await resolve_task_credential(
-        session, settings=SETTINGS, tenant_id="ten_1",
-        config=AgentConfig(driver=driver, model="gpt-4o"), timeout_seconds=600,
+        session,
+        settings=SETTINGS,
+        tenant_id="ten_1",
+        config=AgentConfig(driver=driver, model="gpt-4o"),
+        timeout_seconds=600,
     )
     assert (cred, kind, used) == ("test-key-1234", "api_key", "api_key")
+    assert meta == {"base_url": row["base_url"]}
+
+
+@pytest.mark.parametrize("driver", ["opencode", "codex"])
+async def test_explicit_endpoint_prefers_matching_api_key_over_subscription(driver, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import control_plane.oauth_service as oauth
+
+    refresh = AsyncMock(side_effect=AssertionError("custom endpoint must not use OAuth"))
+    monkeypatch.setattr(oauth, "ensure_fresh_oauth", refresh)
+    row = _key_row("openai", "gateway-only-key")
+    row["base_url"] = "https://gateway.example/api"
+    session = FakeSession(
+        {
+            "openai": [
+                row,
+                {
+                    "auth_method": "oauth_subscription",
+                    "status": "active",
+                    "id": "oauth_1",
+                },
+            ]
+        }
+    )
+    cred, kind, meta, used = await resolve_task_credential(
+        session,
+        settings=SETTINGS,
+        tenant_id="ten_1",
+        config=AgentConfig(driver=driver, model="gpt-4o"),
+        timeout_seconds=600,
+    )
+    assert (cred, kind, used) == ("gateway-only-key", "api_key", "api_key")
+    assert meta == {"base_url": row["base_url"]}
+    refresh.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "driver", ["api", "vanilla", "opencode", "codex", "claude-code", "nanobot"]
+)
+async def test_anthropic_endpoint_only_applies_to_nanobot(driver):
+    row = _key_row("anthropic", "anthropic-key")
+    row["base_url"] = "https://anthropic-gateway.example"
+    session = FakeSession({"anthropic": [row]})
+    _, _, meta, _ = await resolve_task_credential(
+        session,
+        settings=SETTINGS,
+        tenant_id="ten_1",
+        config=AgentConfig(driver=driver, model="claude-x"),
+        timeout_seconds=600,
+    )
     assert meta == ({"base_url": row["base_url"]} if driver == "nanobot" else {})
