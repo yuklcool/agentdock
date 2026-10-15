@@ -106,6 +106,8 @@ Each agent owns a `/workspace` volume that survives restarts, pauses, and archiv
 ### 🧩 Tools, skills & MCP
 api、barebones、OpenCode、Codex 与 Nanobot 支持在 OpenAI 凭据中配置自定义 API Base URL 和 Key。Codex 需要 Responses API，其他四种的自定义接口使用 Chat Completions。设置与部署说明见 [自定义模型接口](docs/MODEL_ENDPOINTS.md)。
 
+Nanobot 模板支持六个初始化文件的编辑、上传与恢复默认：只保存自定义覆盖，创建容器时保存快照，并由官方 onboard 处理缺失文件。模型、凭据和 Base URL 始终由运行时决定。已有容器重启不会重新应用模板，详见 [Nanobot 初始化文件说明](docs/NANOBOT.md#nanobot-模板初始化文件16)。
+
 MCP 服务支持 HTTP 和 HTTPS，可在配置页或列表中测试连接并查看工具。HTTP 无需额外开启协议开关；内网访问通过部署白名单管理。配置、接口和更新说明见 [MCP 使用说明](docs/MCP.md)。
 
 The vanilla driver ships a tool palette: read/write/edit/list files, run **bash** and **Python**, **web search** (self-hosted [SearXNG](https://github.com/searxng/searxng) by default), and **web fetch** (text or headless-Chromium-rendered). Extend agents with reusable **skills** (inline or sourced from a Git repo — multi-skill repos install in one pass, and private repos are supported via per-workspace SSH deploy keys) and **[Model Context Protocol](https://modelcontextprotocol.io) (MCP)** servers.

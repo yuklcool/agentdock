@@ -45,6 +45,7 @@ templates = Table(
     Column("context", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
     Column("skills", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
     Column("mcp_servers", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("nanobot_initial_files", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
     Column("limits", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
     # Runtime shape for containers created from this template (NULL = unset,
     # fall through to request / variant defaults). Mirrors containers.
@@ -78,6 +79,7 @@ containers = Table(
     Column("image_tag", Text, nullable=False),
     Column("image_variant", Text, nullable=False, server_default=text("'full'")),
     Column("template_id", Text, ForeignKey("templates.id"), nullable=True),
+    Column("nanobot_initial_files", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
     Column("config", JSONB, nullable=False),
     Column("status", Text, nullable=False),
     Column("resources", JSONB, nullable=False, server_default=text("'{}'::jsonb")),

@@ -130,6 +130,7 @@ class TemplateRuntime(NamedTuple):
     mem_limit: str | None = None
     cpus: float | None = None
     env_vars: list | None = None  # stored-shape items, copied verbatim
+    nanobot_initial_files: dict[str, str] | None = None
 
 
 router = APIRouter(tags=["Containers"])
@@ -248,6 +249,7 @@ def _row_to_container_out(row: Any) -> ContainerOut:
         image_tag=row.image_tag,
         image_variant=row.image_variant,
         template_id=row.template_id,
+        nanobot_initial_files=getattr(row, "nanobot_initial_files", {}) or {},
         config=AgentConfig(**row.config),
         last_task_at=row.last_task_at.isoformat() if row.last_task_at else None,
         created_at=row.created_at.isoformat(),
@@ -298,7 +300,14 @@ async def _resolve_create_config(
             mem_limit=trow.mem_limit,
             cpus=trow.cpus,
             env_vars=trow.env_vars,
+            nanobot_initial_files=getattr(trow, "nanobot_initial_files", {}) or {},
         )
+
+        if trow.driver == "nanobot":
+            # Legacy runtime columns remain readable for old clients, but no
+            # longer determine new Nanobot containers. Existing rows are untouched.
+            base["model"] = None
+            tpl_runtime = TemplateRuntime(nanobot_initial_files=tpl_runtime.nanobot_initial_files)
 
     if req.config is not None:
         # Inline config: it is the complete active config (overrides template).
@@ -311,6 +320,10 @@ async def _resolve_create_config(
         cfg = AgentConfig(**base)
     else:
         raise validation_error("provide either template_id or config", field="config")
+
+    if tpl_runtime.nanobot_initial_files and cfg.driver != "nanobot":
+        raise validation_error("Nanobot initialization files require the Nanobot driver",
+                               field="config.driver")
 
     return cfg, template_id, tpl_runtime
 
@@ -525,6 +538,8 @@ async def create_container(
     image_tag = body.image_tag or settings.agent_image_tag
     max_workers = worker_cap_for_driver(limits, config.driver)
     reuse_volume = body.volume_id
+    if reuse_volume and tpl_runtime.nanobot_initial_files:
+        raise validation_error("Initialization overrides require a new volume", field="volume_id")
 
     token = secrets.token_urlsafe(32)
     resources: dict[str, Any] = dict(body.resources or {})
@@ -543,6 +558,7 @@ async def create_container(
                 image_tag=image_tag,
                 image_variant=variant,
                 template_id=template_id,
+                nanobot_initial_files=tpl_runtime.nanobot_initial_files or {},
                 config=config.model_dump(),
                 status="provisioning",
                 resources=resources,
@@ -574,6 +590,8 @@ async def create_container(
             reuse_volume_name=reuse_volume,
             extra_env=settings.agent_extra_env,
             shim_token=token,
+            **({"nanobot_initial_files": tpl_runtime.nanobot_initial_files or {}}
+               if config.driver == "nanobot" and not reuse_volume else {}),
         )
     except Exception as exc:
         # Provisioner cleans partial resources; error rows remain diagnosable and

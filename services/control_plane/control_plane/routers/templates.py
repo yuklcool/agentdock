@@ -12,6 +12,7 @@ import agentcore.drivers.vanilla  # noqa: F401
 import agentcore.tools  # noqa: F401
 from agentcore.drivers.base import DRIVERS
 from agentcore.models import ContextSpec, Effort
+from agentcore.nanobot_files import validate_nanobot_files
 from agentcore.tools.base import TOOLS
 from control_plane.auth.crypto import load_key_from_env
 from control_plane.auth.principal import Principal, require_admin, resolve_principal
@@ -27,6 +28,16 @@ from control_plane.variants import assert_config_runnable_on_variant, known_vari
 router = APIRouter(tags=["Templates"])
 
 _VALID_EFFORTS = set(get_args(Effort))
+_INITIAL_FILES_OPENAPI = {"requestBody": {"content": {"application/json": {"schema": {
+    "type": "object", "properties": {"nanobot_initial_files": {
+        "type": "object", "description": "Nanobot only: sparse initialization overrides. "
+        "Omitted/null filenames use native defaults; PATCH replaces this whole map. "
+        "Allowed names: config.json, AGENTS.md, SOUL.md, USER.md, HEARTBEAT.md, TOOLS.md. "
+        "64 KiB UTF-8 per file; no model credentials. Applied once on a new volume.",
+        "additionalProperties": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "example": {"SOUL.md": "Be helpful.", "USER.md": None},
+    }},
+}}}}}
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +105,13 @@ def template_env_from_body(
     if not isinstance(raw, list) or not all(isinstance(i, dict) for i in raw):
         raise validation_error("env_vars must be a list of objects", field="env_vars")
     return store_env_vars(raw, existing, load_key_from_env)
+
+
+def initial_files_from_body(raw: Any, driver: str) -> dict[str, str]:
+    try:
+        return validate_nanobot_files(raw, driver=driver)
+    except ValueError as exc:
+        raise validation_error(str(exc), field="nanobot_initial_files") from exc
 
 
 def validate_effort(value: Any) -> None:
@@ -177,6 +195,7 @@ def template_public_view(row: dict[str, Any]) -> dict[str, Any]:
         "driver_template": driver_template,
         "available_tool_specs": available_tool_specs,
         "env_vars": public_env_vars(row.get("env_vars")),
+        "nanobot_initial_files": row.get("nanobot_initial_files") or {},
     }
 
 
@@ -264,6 +283,7 @@ async def get_template(
 
 @router.post(
     "/templates",
+    openapi_extra=_INITIAL_FILES_OPENAPI,
     response_description="The created, driver-enriched template.",
 )
 async def create_template(
@@ -311,6 +331,9 @@ async def create_template(
         "env_vars": template_env_from_body(body.get("env_vars"), existing=None),
         "is_builtin": False,
         "created_by": principal.user_id,
+        "nanobot_initial_files": initial_files_from_body(
+            body.get("nanobot_initial_files"), body["driver"],
+        ),
     }
 
     if new_row["driver"] not in DRIVERS:
@@ -325,6 +348,8 @@ async def create_template(
         tool_names=list(new_row["tools"] or []),
         settings=request.app.state.settings,
     ))
+    if new_row["driver"] == "nanobot":
+        new_row.update(model=None, image_variant=None, mem_limit=None, cpus=None, env_vars=None)
 
     async with request.app.state.session_factory() as session:
         await session.execute(templates.insert().values(**new_row))
@@ -335,6 +360,7 @@ async def create_template(
 
 @router.patch(
     "/templates/{template_id}",
+    openapi_extra=_INITIAL_FILES_OPENAPI,
     response_description="The updated, driver-enriched template.",
 )
 async def patch_template(
@@ -377,8 +403,14 @@ async def patch_template(
             "name", "driver", "model", "effort", "system_prompt",
             "system_prompt_mode", "tools", "context", "skills", "mcp_servers", "limits",
             "image_variant", "mem_limit", "cpus", "env_vars",
+            "nanobot_initial_files",
         }
         updates = {k: v for k, v in body.items() if k in allowed_fields}
+        if "nanobot_initial_files" in updates or "driver" in updates:
+            updates["nanobot_initial_files"] = initial_files_from_body(
+                updates.get("nanobot_initial_files", row_dict.get("nanobot_initial_files")),
+                updates.get("driver", row_dict["driver"]),
+            )
         if (
             "tools" not in updates
             and "driver" in updates
@@ -500,6 +532,7 @@ async def clone_template(
             "mem_limit": source.get("mem_limit"),
             "cpus": source.get("cpus"),
             "env_vars": source.get("env_vars"),
+            "nanobot_initial_files": source.get("nanobot_initial_files") or {},
             "is_builtin": False,
             "created_by": principal.user_id,
         }

@@ -49,7 +49,7 @@ function SectionCard({
 }
 
 export function ConfigFields({
-  value, driverMeta, enabledSkills, enabledMcpServers, onPatch, variantWarning, showDriverFlags = false,
+  value, driverMeta, enabledSkills, enabledMcpServers, onPatch, variantWarning, showDriverFlags = false, showModel = true,
 }: {
   value: ConfigFieldsValue;
   driverMeta: Template | undefined;
@@ -59,6 +59,7 @@ export function ConfigFields({
   variantWarning?: ReactNode;
   // Templates don't store the driver flags, so only container config shows them.
   showDriverFlags?: boolean;
+  showModel?: boolean;
 }) {
   const toolSpecs: ToolSpec[] = driverMeta?.available_tool_specs ?? [];
   const isApiDriver = value.driver === "api";
@@ -87,7 +88,7 @@ export function ConfigFields({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Model */}
-      <SectionCard icon={Icons.Cpu} title="Model">
+      {showModel && <SectionCard icon={Icons.Cpu} title="Model">
         <ModelPicker driver={value.driver} value={value.model} onChange={(m) => onPatch({ model: m })} />
         {EFFORT_DRIVERS.includes(value.driver) && (
           <div style={{ marginTop: 14 }}>
@@ -124,8 +125,7 @@ export function ConfigFields({
             </div>
           </div>
         )}
-      </SectionCard>
-
+      </SectionCard>}
       {/* System prompt — prompt-mode control lives in the header */}
       <SectionCard
         icon={Icons.Terminal}

@@ -80,3 +80,50 @@ async def test_provision_logs_phase_timings(monkeypatch, caplog):
     assert any("con_test" in m and "image ready" in m for m in msgs)
     assert any("con_test" in m and "container started" in m for m in msgs)
     assert any("con_test" in m and "ready" in m and "total" in m for m in msgs)
+
+
+@pytest.mark.parametrize("fail", [False, True])
+async def test_initialization_finishes_before_provision_success_and_cleans_failure(
+    monkeypatch, fail,
+):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(p, "_docker_client", lambda: _FakeClient())
+    order = []
+
+    async def ready(*args):
+        order.append("ready")
+        return True
+
+    class Shim:
+        def __init__(self, **kwargs):
+            assert kwargs["token"] == "shim-private"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def initialize_nanobot(self, files):
+            order.append("initialize")
+            assert files == {"SOUL.md": "v1"}
+            if fail:
+                raise RuntimeError("native failure")
+
+    cleanup = AsyncMock()
+    monkeypatch.setattr(p, "_poll_readyz", ready)
+    monkeypatch.setattr(p, "ShimClient", Shim)
+    monkeypatch.setattr(p, "_teardown", cleanup)
+    args = dict(settings=_settings(), container_id="con_init", tenant_id="ten_test",
+                image_tag="dev", max_workers=1, mem_limit="1g", cpus=1,
+                shim_token="shim-private", nanobot_initial_files={"SOUL.md": "v1"})
+    if fail:
+        with pytest.raises(p.ReadinessFailed):
+            await p.provision_container(**args)
+        cleanup.assert_awaited_once()
+        assert cleanup.call_args.args[-1] is not None  # new volume is removed
+    else:
+        await p.provision_container(**args)
+        cleanup.assert_not_awaited()
+    assert order == ["ready", "initialize"]

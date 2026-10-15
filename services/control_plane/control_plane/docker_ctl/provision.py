@@ -184,6 +184,7 @@ async def provision_container(
     reuse_volume_name: str | None = None,
     extra_env: dict[str, str] | None = None,
     shim_token: str | None = None,
+    nanobot_initial_files: dict[str, str] | None = None,
 ) -> ProvisionResult:
     """Create the volume + container, start it, poll /readyz. On failure remove
     the partial container and the volume we created (a reused volume is left intact),
@@ -275,6 +276,14 @@ async def provision_container(
     if not ready:
         await _teardown(client, docker_name, volume_name if created_volume else None)
         raise ReadinessFailed(f"{docker_name} not ready within {settings.readyz_timeout_seconds}s")
+
+    if nanobot_initial_files is not None:
+        try:
+            async with ShimClient(base_url=base_url, token=shim_token, timeout=75) as shim:
+                await shim.initialize_nanobot(nanobot_initial_files)
+        except Exception:
+            await _teardown(client, docker_name, volume_name if created_volume else None)
+            raise ReadinessFailed("Nanobot initialization failed") from None
 
     return ProvisionResult(
         docker_name=docker_name,

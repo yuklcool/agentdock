@@ -79,6 +79,8 @@ export interface ToolSpec {
   name: string; description: string; input_schema: Record<string, unknown>;
   requires_image_feature: string | null;
 }
+export type NanobotFiles = Partial<Record<"config.json" | "AGENTS.md" | "SOUL.md" | "USER.md" | "HEARTBEAT.md" | "TOOLS.md", string | null>>;
+
 export interface Template {
   id: string; tenant_id: string | null; name: string; driver: string; model: string | null;
   system_prompt: string; system_prompt_mode: SystemPromptMode; tools: string[];
@@ -86,6 +88,7 @@ export interface Template {
   image_variant?: "full" | "slim" | null; mem_limit?: string | null; cpus?: number | null;
   effort?: Effort | null;
   env_vars?: EnvVar[];
+  nanobot_initial_files?: NanobotFiles;
   capabilities: DriverCapabilities; driver_template: DriverTemplate; available_tool_specs: ToolSpec[];
 }
 
@@ -110,6 +113,7 @@ export interface TemplateDraft {
   image_variant: "" | "full" | "slim"; mem_limit: string; cpus: string;
   effort: Effort | null;
   env_vars: EnvVar[];
+  nanobot_initial_files?: NanobotFiles;
 }
 
 // Wire payload for saving a template: like the draft, but `model` is null when unset.

@@ -15,6 +15,70 @@ AgentDock 是可自行部署的智能体容器管理平台。本版本把
 - 单会话取消、超时清理、网关故障检测与下一任务重启。
 - 将后台选择的远程 MCP 和 Skill 同步给 Nanobot 执行。
 - API key 配置和 MCP 密钥仅写入运行时临时目录；会话状态写入持久 Volume。
+- Nanobot 模板的六个初始化文件覆盖、在线编辑/上传、恢复默认和创建时快照。
+
+## Nanobot 模板初始化文件（#16）
+
+在 Settings → Templates 克隆内置 Nanobot 模板，或创建自己的 Nanobot 模板。
+“Nanobot 初始化文件”支持 `config.json`、`AGENTS.md`、`SOUL.md`、`USER.md`、
+`HEARTBEAT.md`、`TOOLS.md`。每个文件可以在线编辑、上传、重新上传和恢复默认；
+JSON 支持格式化。单文件上限 64 KiB UTF-8。空 Markdown 是显式覆盖，空 JSON 无效。
+
+模板 API 的 `nanobot_initial_files` 是稀疏映射，例如：
+
+```json
+{
+  "SOUL.md": "请使用中文回答。",
+  "USER.md": null,
+  "config.json": "{\"agents\":{\"defaults\":{\"timezone\":\"Asia/Shanghai\"}}}"
+}
+```
+
+省略/null 表示没有覆盖，数据库不会保存 Nanobot 默认文件内容。
+PATCH 的映射采用整体替换语义：只保留提交的非 null 文件；`{}` 删除全部覆盖。
+恢复默认只删除模板中的覆盖，不改已创建的容器。内置模板仍只读，需先克隆。
+不接受路径、未知文件名、重复 JSON 键、非对象 JSON、NaN 或模型 API Key/认证令牌；
+模型密钥请放在 Credentials。不得将 Workspace 凭据粘贴进初始化文件。
+
+创建新 Volume 的 Nanobot 容器时，控制面将模板覆盖复制到容器的
+`nanobot_initial_files` 创建快照，等 Shim 就绪后调用受 Shim Token 保护的初始化接口。
+Shim 先写入自定义 Markdown，再以 agent 用户调用镜像自带的
+`nanobot onboard --refresh --config ... --workspace ...`。默认配置、缺失的 Markdown
+全部由这条官方命令初始化；上游不生成的文件，AgentDock 也不生成。
+存在自定义 config.json 时交给 native onboard 补齐原生配置，而不是维护平台默认 JSON。
+初始化失败会删除新建容器和新 Volume，不会返回可运行状态。
+
+此镜像采用只读根文件系统和 agent 用户执行 Nanobot，因此不使用不可写的
+`/root/.nanobot`。逻辑文件名保持相同，路径统一由运行时解析：Markdown 位于
+`<workspace>/nanobot/`（默认 `/workspace/nanobot/`）；原生初始化配置存于
+`<workspace>/.agent-runtime/nanobot-init/config.json`，目录 0700、文件 0600，由 Shim 持有。
+网关仍使用显式 `--config` 指向带本次凭据的临时配置；该临时目录在停止时清理。
+没有修改 Nanobot 上游源码，也没有降低现有 uid、文件或网络隔离。
+
+最终配置优先级为 **Nanobot 原生默认 < Template config.json < AgentDock Runtime**。
+容器创建页选择模型、镜像、CPU/内存及环境变量；新 Nanobot 容器不再继承旧模板的
+model/image_variant/mem_limit/cpus/env_vars。API 创建 Nanobot 容器需提供 `config.model`。
+模板仍可配置提示词、上下文与平台分配的 Skill/MCP。
+运行时覆盖模型、Provider、Key、Base URL、激活模型预设和 fallback（防止绕过选定模型），
+以及平台的任务限制、工作路径、WebSocket、MCP 和沙箱网络策略。
+其他原生配置如时区、Memory、Dream、Heartbeat 和额外 Channels 保留。
+运行时不把模型 Key 写回模板、数据库快照或持久初始化配置；清空 Base URL 后不会保留
+模板里同一 Provider 的旧地址/认证头。
+
+初始化成功后，配置文件同时作为一次性完成标记；再次调用不会重新应用覆盖。
+Docker/Nanobot/AgentDock 重启、Pause/Resume、归档恢复和镜像更新复用同一 Volume，
+不会重新从模板写文件。用户后续编辑的 Markdown 和会话、记忆保持原样。
+已有旧容器迁移只获得空快照，不执行 onboard、不重写配置或文件，继续原有驱动行为。
+复用现有 Volume 不应用模板初始化文件；携带非空覆盖同时指定 `volume_id` 会被拒绝。
+
+数据库迁移 `0035_nanobot_initial_files` 只添加模板与容器的两个 JSONB 字段，
+默认 `{}`，不删除旧运行字段、不改已有容器配置。上线需同时更新 control-plane、
+web-console、agent-runtime 并执行迁移；旧 runtime 没有初始化接口，新建流程会明确失败，
+不会静默忽略覆盖。0.3.8 镜像不包含本功能。
+
+回归包括模板 CRUD/克隆/恢复默认、PostgreSQL 创建快照、运行时优先级、失败清理、
+前端六文件操作，以及固定基础镜像内的官方 onboard、真实模型请求、网关重启、
+Docker pause/resume、Volume 复用和多实例隔离。
 
 本版本复用现成镜像 `registry.cn-hangzhou.aliyuncs.com/telchina/nanobot:0.3.0-node24`，
 固定摘要 `sha256:4830eebc736a219a7d3267b24c2fda07f305dea9af388811e89afc09db669d23`。
