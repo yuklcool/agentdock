@@ -16,9 +16,9 @@ def main():
     args = parser.parse_args()
     name = "agentdock-image-check-" + uuid.uuid4().hex[:8]
 
-    def docker(*parts, check=True):
+    def docker(*parts, check=True, timeout=30):
         return subprocess.run(
-            ["docker", *parts], check=check, capture_output=True, text=True, timeout=30
+            ["docker", *parts], check=check, capture_output=True, text=True, timeout=timeout
         )
 
     try:
@@ -96,6 +96,30 @@ def main():
                 "http://127.0.0.1:8080/tasks",
             )
             assert response.stdout == expected, response.stdout
+        # Exercise the real protected initialization API with the production
+        # read-only root, uid drop and capability set (not a root-only CLI test).
+        def initialize(soul):
+            response = docker(
+                "exec", name, "curl", "-fsS", "-H", "Authorization: Bearer image-test-only",
+                "-H", "Content-Type: application/json", "-d",
+                json.dumps({"files": {"SOUL.md": soul}}),
+                "http://127.0.0.1:8080/nanobot/initialize", timeout=90,
+            )
+            return json.loads(response.stdout)
+
+        assert initialize("Image initialization soul") == {"initialized": True}
+        assert initialize("Must not reapply") == {"initialized": False}
+        docker("exec", name, "python3", "-c", (
+            "import json,pathlib; "
+            "p=pathlib.Path('/workspace/.agent-runtime/nanobot-init/config.json'); "
+            "assert p.stat().st_uid == 0 and p.stat().st_mode & 0o777 == 0o600; "
+            "c=json.loads(p.read_text()); "
+            "assert c['agents']['defaults']['workspace'] == '/workspace/nanobot'; "
+            "w=pathlib.Path('/workspace/nanobot'); "
+            "assert (w/'SOUL.md').read_text() == 'Image initialization soul'; "
+            "assert (w/'AGENTS.md').exists(); "
+            "assert (w/'SOUL.md').stat().st_uid == 1000"
+        ))
         docker(
             "exec",
             "--user",
@@ -104,10 +128,11 @@ def main():
             "/bin/sh",
             "-ec",
             "test ! -r /workspace/.agent-runtime/tasks; "
+            "test ! -r /workspace/.agent-runtime/nanobot-init/config.json; "
             "test -w /workspace/.agent-state; "
             "/app/.venv/bin/nanobot --help >/dev/null; node --version",
         )
-        print("Shim entrypoint, readiness, authentication and uid boundaries passed")
+        print("Shim entrypoint, native initialization, authentication and uid boundaries passed")
     finally:
         docker("rm", "-f", name, check=False)
         docker("volume", "rm", name, check=False)
