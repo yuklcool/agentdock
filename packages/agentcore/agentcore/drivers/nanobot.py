@@ -26,6 +26,7 @@ from websockets.asyncio.client import ClientConnection, connect
 
 from agentcore import sandbox
 from agentcore.drivers.base import DriverCapabilities, DriverTemplate, EmitFn, register
+from agentcore.drivers.nanobot_init import initialized_config_path, nanobot_workspace
 from agentcore.drivers.skills_md import valid_skill_name, write_skills
 from agentcore.models import (
     AgentConfig,
@@ -35,6 +36,7 @@ from agentcore.models import (
     TaskBody,
     TaskResult,
 )
+from agentcore.nanobot_files import merge_config
 
 _CHAT_ID = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
 # Nanobot derives these directories from the config path, not workspace.
@@ -88,10 +90,10 @@ def runtime_config(
         ]
     except ValueError:
         raise NanobotError("nanobot_invalid_ssrf_whitelist") from None
-    return {
+    managed: dict[str, Any] = {
         "agents": {
             "defaults": {
-                "workspace": str(Path(workspace) / "nanobot"),
+                "workspace": str(nanobot_workspace(workspace)),
                 "model": model,
                 "provider": provider,
                 "maxTokens": min(limits.max_tokens, 8192),
@@ -119,6 +121,25 @@ def runtime_config(
             "ssrfWhitelist": whitelist,
         },
     }
+    source = initialized_config_path(workspace)
+    if not source.exists():
+        return managed  # Preserve pre-feature containers; do not initialize on restart.
+    try:
+        native = json.loads(source.read_text(encoding="utf-8"))
+        if not isinstance(native, dict):
+            raise ValueError("not an object")
+        # These are native features, not runtime-owned model/transport settings.
+        managed["agents"]["defaults"].pop("dream")
+        managed["gateway"].pop("heartbeat")
+        managed["agents"]["defaults"].update(modelPreset=None, fallbackModels=[])
+        merged = merge_config(native, managed)
+        # Replacement clears template apiBase/headers/auth when the runtime uses
+        # a provider default. Deep merging here would leak stale endpoint fields.
+        merged["providers"][provider] = provider_config
+        merged["tools"]["mcpServers"] = mcp
+        return merged
+    except (ValueError, TypeError, OSError):
+        raise NanobotError("nanobot_invalid_initial_config") from None
 
 
 def task_prompt(task: TaskBody, config: AgentConfig) -> str:
@@ -205,7 +226,7 @@ class NanobotRuntime:
         if self.revision == revision and await self.ready():
             return
         await self.close()
-        native_workspace = Path(self.workspace) / "nanobot"
+        native_workspace = nanobot_workspace(self.workspace)
         if native_workspace.is_symlink():
             raise NanobotError("nanobot_workspace_path_conflict")
         sandbox.makedirs_agent(str(native_workspace))

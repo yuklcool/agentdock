@@ -59,7 +59,7 @@ async def test_codex_default_tools_backfill(migrated_db: str) -> None:
                 "('cnt_m29_vanilla', 'ten_m29', 'c', 'd3', 'v3', 't', 'test', "
                 " '{\"driver\":\"vanilla\",\"model\":\"m\",\"tools\":[]}'::jsonb, 'running')"))
 
-        _alembic("upgrade", "head")
+        _alembic("upgrade", "0034_codex_default_tools")
 
         async with engine.begin() as conn:
             assert await _tools(
@@ -86,7 +86,7 @@ async def test_codex_default_tools_backfill(migrated_db: str) -> None:
         # running the downgrade SQL, so the user's choice is still in place
         # when the upgrade re-runs 0034's UPDATEs).
         _alembic("stamp", "0033_single_user_container")
-        _alembic("upgrade", "head")
+        _alembic("upgrade", "0034_codex_default_tools")
 
         async with engine.begin() as conn:
             assert await _tools(

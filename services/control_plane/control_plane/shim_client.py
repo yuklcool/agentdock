@@ -106,6 +106,12 @@ class ShimClient:
             raise ShimError(f"shim POST /tasks -> {r.status_code}: {r.text}")
         return r.json()  # type: ignore[no-any-return]
 
+    async def initialize_nanobot(self, files: dict[str, str]) -> None:
+        response = await self._client.post("/nanobot/initialize", json={"files": files})
+        if response.status_code >= 400:
+            # Never propagate a native config or credential in error text.
+            raise ShimError(f"Nanobot initialization failed ({response.status_code})")
+
     async def get_task(self, task_id: str) -> dict[str, Any]:
         r = await self._client.get(f"/tasks/{task_id}")
         if r.status_code == 404:

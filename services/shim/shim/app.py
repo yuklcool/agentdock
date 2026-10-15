@@ -18,7 +18,9 @@ from pydantic import ValidationError
 
 from agentcore import sandbox
 from agentcore.drivers.base import DRIVERS
+from agentcore.drivers.nanobot_init import initialize_nanobot
 from agentcore.models import ShimTaskRequest
+from agentcore.nanobot_files import validate_nanobot_files
 from agentcore.tools.paths import RESERVED_DIRS
 from shim.auth import TokenAuth
 from shim.git_ops import GitError, GitOps
@@ -143,6 +145,27 @@ def create_app(
     subscribers: dict[str, list[asyncio.Queue[Any]]] = {}
     bg_tasks: set[asyncio.Task[None]] = set()
     git = GitOps(workspace)
+    initialization_lock = asyncio.Lock()
+
+    @app.post("/nanobot/initialize")
+    async def nanobot_initialize(
+        request: Request, authorization: str | None = Header(default=None),
+    ) -> dict[str, bool]:
+        auth.check(authorization)
+        if len(await request.body()) > 2_500_000:
+            raise HTTPException(413, "Initialization payload too large")
+        async with initialization_lock:
+            if runners:
+                raise HTTPException(409, "Cannot initialize after task execution")
+            try:
+                payload = await request.json()
+                if not isinstance(payload, dict) or "files" not in payload:
+                    raise ValueError("missing initialization files")
+                files = validate_nanobot_files(payload["files"])
+                created = await initialize_nanobot(workspace, files)
+            except (ValueError, OSError):
+                raise HTTPException(400, "Nanobot initialization failed") from None
+            return {"initialized": created}
 
     def _active_count() -> int:
         return len([r for r in runners.values() if r.status == "running"])
@@ -234,6 +257,8 @@ def create_app(
         req: Request, authorization: str | None = Header(default=None)
     ) -> Response | dict[str, Any]:
         auth.check(authorization)
+        if initialization_lock.locked():
+            raise HTTPException(409, "Nanobot initialization is in progress")
         try:
             body = await req.json()
             shim_req = ShimTaskRequest.model_validate(body)

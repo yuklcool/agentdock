@@ -18,6 +18,7 @@ import pytest
 
 from agentcore import sandbox
 from agentcore.drivers.nanobot import NanobotDriver
+from agentcore.drivers.nanobot_init import initialize_nanobot, initialized_config_path
 from agentcore.models import AgentConfig, ResolvedLimits, ShimMcpServer, ShimSkill, TaskBody
 
 pytestmark = pytest.mark.skipif(
@@ -104,6 +105,7 @@ async def test_real_gateway_streaming_history_and_restart(monkeypatch):
                 await writer.drain()
                 return
             received.append(body)
+            assert b"authorization: bearer local-test-only" in headers.lower()
             response = "AgentDock live answer"
             if body.get("stream"):
                 payload = {
@@ -166,6 +168,23 @@ async def test_real_gateway_streaming_history_and_restart(monkeypatch):
     restoring = os.environ.get("AGENTDOCK_TEST_RESTORE") == "1"
     # Production layout: root-owned workspace with sticky bit; agent can write.
     Path(workspace).chmod(0o1777)
+    initialized = await initialize_nanobot(workspace, {
+        "SOUL.md": "Initialization soul" if not restoring else "must never overwrite",
+        "config.json": json.dumps({
+            "agents": {"defaults": {
+                "model": "wrong-template-model", "provider": "anthropic",
+                "modelPreset": "trap", "fallbackModels": ["trap"],
+                "dream": {"enabled": False}, "timezone": "Asia/Shanghai",
+            }},
+            "modelPresets": {"trap": {"model": "wrong-template-model", "provider": "anthropic"}},
+            "providers": {"openai": {"apiBase": "https://wrong.invalid/v1"}},
+            "gateway": {"heartbeat": {"enabled": False}},
+        }),
+    })
+    assert initialized is not restoring
+    soul = Path(workspace) / "nanobot/SOUL.md"
+    assert soul.read_text() == ("User edited soul" if restoring else "Initialization soul")
+    assert (Path(workspace) / "nanobot/AGENTS.md").exists()
     events = []
 
     async def emit(kind, payload):
@@ -209,6 +228,11 @@ async def test_real_gateway_streaming_history_and_restart(monkeypatch):
         if restoring:
             assert marker in json.dumps(received[-1]["messages"])
         assert result.success, (result, events)
+        assert received[-1]["model"] == "gpt-4o"
+        assert "local-test-only" not in initialized_config_path(workspace).read_text()
+        soul.write_text("User edited soul")
+        assert not await initialize_nanobot(workspace, {"SOUL.md": "Template V2"})
+        assert soul.read_text() == "User edited soul"
         assert "AgentDock live answer" in result.output["output"]
         assert any(kind == "assistant_delta" for kind, _ in events)
         assert "initialize" in mcp_methods and "tools/list" in mcp_methods

@@ -75,7 +75,9 @@ class CreateContainerRequest(BaseModel):
         None,
         description=(
             "Seed the container's config from this template. Provide either "
-            "`template_id` or an inline `config`; an inline `config` overrides the template."
+            "`template_id` or an inline `config`; an inline `config` overrides the template. "
+            "Nanobot templates snapshot initialization files separately and require an explicit "
+            "runtime config.model; legacy template model/resources/env no longer apply."
         ),
     )
     external_id: str | None = Field(
@@ -149,6 +151,11 @@ class ContainerOut(BaseModel):
     image_tag: str = Field(description="Agent image tag the container runs.")
     image_variant: str = Field(description="Image variant (`full` or `slim`).")
     template_id: str | None = Field(description="Template the container was seeded from, if any.")
+    nanobot_initial_files: dict[str, str] = Field(
+        default_factory=dict,
+        description="Creation-time snapshot of Nanobot template overrides. Never re-applied on "
+        "restart/recover. Runtime configuration and credentials are not stored in this snapshot.",
+    )
     config: AgentConfig = Field(description="The container's active agent configuration.")
     last_task_at: str | None = Field(
         description="ISO-8601 timestamp of the most recent task, or null if none."

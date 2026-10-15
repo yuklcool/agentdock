@@ -9,6 +9,7 @@ import { Dropdown } from "../../ui/Dropdown";
 import { ConfigFields } from "../../components/ConfigFields";
 import { DriverPicker } from "../../components/DriverPicker";
 import { EnvVarsField } from "../../components/EnvVarsField";
+import { NanobotInitialFiles, nanobotFilesError } from "../../components/NanobotInitialFiles";
 import { assemblePrompt } from "../assemblePrompt";
 import { driverLabel } from "../../lib/drivers";
 import { MEM_OPTIONS, CPU_OPTIONS, withCurrentValue } from "../../lib/resourceOptions";
@@ -19,6 +20,7 @@ const EMPTY: TemplateDraft = {
   name: "", driver: "vanilla", model: "", system_prompt: "", system_prompt_mode: "augment",
   tools: [], context: { variables: {}, text: null, files: [] }, skills: [], mcp_servers: [], limits: {},
   image_variant: "", mem_limit: "", cpus: "", effort: null, env_vars: [],
+  nanobot_initial_files: {},
 };
 
 function fromTemplate(t: Template): TemplateDraft {
@@ -38,6 +40,7 @@ function fromTemplate(t: Template): TemplateDraft {
     cpus: t.cpus != null ? String(t.cpus) : "",
     effort: t.effort ?? null,
     env_vars: (t.env_vars ?? []).map((v) => ({ ...v })),
+    nanobot_initial_files: { ...(t.nanobot_initial_files ?? {}) },
   };
 }
 
@@ -90,18 +93,26 @@ export default function TemplateForm() {
       skills: skillDriver ? d.skills : [],
       mcp_servers: skillDriver ? d.mcp_servers : [],
       effort: supportsEffort ? d.effort : null,
+      nanobot_initial_files: driver === "nanobot" ? d.nanobot_initial_files : {},
     } : d));
   }
 
   async function onSave() {
     if (!draft) return;
     if (!draft.name.trim()) { toast.error("Name is required"); return; }
+    if (draft.driver === "nanobot") {
+      const error = nanobotFilesError(draft.nanobot_initial_files ?? {});
+      if (error) { toast.error(error); return; }
+    }
     const body: TemplateSavePayload = {
       ...draft,
       model: draft.model || null,
       image_variant: draft.image_variant || null,
       mem_limit: draft.mem_limit || null,
       cpus: draft.cpus ? Number(draft.cpus) : null,
+      ...(draft.driver === "nanobot" ? {
+        model: null, image_variant: null, mem_limit: null, cpus: null, env_vars: [],
+      } : {}),
     };
     try {
       await save.mutateAsync(id ? { id, body } : { body });
@@ -153,9 +164,11 @@ export default function TemplateForm() {
         </Field>
 
         {/* Shared driver-conditional fields */}
-        <ConfigFields value={draft} driverMeta={driverMeta} enabledSkills={enabledSkills} enabledMcpServers={enabledMcpServers} onPatch={patch} />
+        <ConfigFields value={draft} driverMeta={driverMeta} enabledSkills={enabledSkills} enabledMcpServers={enabledMcpServers} onPatch={patch} showModel={draft.driver !== "nanobot"} />
+        {draft.driver === "nanobot" && <NanobotInitialFiles value={draft.nanobot_initial_files ?? {}} onChange={(files) => patch({ nanobot_initial_files: files })} />}
 
         {/* Runtime — image + resources for containers created from this template */}
+        {draft.driver !== "nanobot" && <>
         <Field
           label="Runtime"
           hint="Image and resources for containers created from this template. Leave unset to use the platform defaults."
@@ -205,6 +218,7 @@ export default function TemplateForm() {
             onChange={(rows) => patch({ env_vars: rows })}
           />
         </Field>
+        </>}
       </div>
 
       {/* RIGHT — live preview + summary + actions */}
@@ -218,11 +232,13 @@ export default function TemplateForm() {
           {/* Summary */}
           <dl className="kv" style={{ margin: 0 }}>
             <dt>Driver</dt><dd className="mono">{driverLabel(draft.driver)}</dd>
-            <dt>Model</dt><dd className="mono">{draft.model || "tenant default"}</dd>
+            <dt>Model</dt><dd className="mono">{draft.driver === "nanobot" ? "创建容器时选择" : draft.model || "tenant default"}</dd>
             {draft.effort && (<><dt>Effort</dt><dd className="mono">{draft.effort}</dd></>)}
-            {draft.image_variant && (<><dt>Image</dt><dd>{draft.image_variant === "full" ? "Full" : "Slim"}</dd></>)}
-            {draft.mem_limit && (<><dt>Memory</dt><dd className="mono">{MEM_OPTIONS.find((o) => o.value === draft.mem_limit)?.label ?? draft.mem_limit}</dd></>)}
-            {draft.cpus && (<><dt>CPUs</dt><dd className="mono">{CPU_OPTIONS.find((o) => o.value === draft.cpus)?.label ?? draft.cpus}</dd></>)}
+            {draft.driver !== "nanobot" && <>
+              {draft.image_variant && (<><dt>Image</dt><dd>{draft.image_variant === "full" ? "Full" : "Slim"}</dd></>)}
+              {draft.mem_limit && (<><dt>Memory</dt><dd className="mono">{MEM_OPTIONS.find((o) => o.value === draft.mem_limit)?.label ?? draft.mem_limit}</dd></>)}
+              {draft.cpus && (<><dt>CPUs</dt><dd className="mono">{CPU_OPTIONS.find((o) => o.value === draft.cpus)?.label ?? draft.cpus}</dd></>)}
+            </>}
             {editableTools && (<><dt>Tools</dt><dd>{draft.tools.length} enabled</dd></>)}
             {isSkillDriver && (<><dt>Skills</dt><dd>{(draft.skills ?? []).length} attached</dd></>)}
             {isSkillDriver && (<><dt>MCP servers</dt><dd>{(draft.mcp_servers ?? []).length} attached</dd></>)}

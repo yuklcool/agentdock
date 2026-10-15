@@ -33,6 +33,32 @@ function setupAuth(role = "admin") {
 }
 
 describe("CreateContainer", () => {
+  it("ignores legacy Nanobot template runtime values and requires an explicit model", async () => {
+    setupAuth();
+    const user = userEvent.setup();
+    server.use(http.get("/v1/templates", () => HttpResponse.json({ templates: [tpl({
+      driver: "nanobot", model: "legacy-model", image_variant: "slim", mem_limit: "8g", cpus: 4,
+      nanobot_initial_files: { "SOUL.md": "custom" }, env_vars: [{ name: "OLD", value: "old", secret: false }],
+    })] })));
+    let posted: any = null;
+    server.use(http.post("/v1/containers", async ({ request }) => {
+      posted = await request.json();
+      return HttpResponse.json({ id: "con_new" });
+    }));
+    renderWithProviders(<AuthProvider><CreateContainer /></AuthProvider>);
+    await screen.findByRole("button", { name: /Research assistant/i });
+    await user.type(screen.getByLabelText(/name/i), "native");
+    expect(screen.getByRole("button", { name: /Create container/i })).toBeDisabled();
+    expect(screen.queryByText("Template default (8g)")).not.toBeInTheDocument();
+    expect(screen.getByText("SOUL.md", { exact: true })).toBeInTheDocument();
+    await user.click(await screen.findByRole("radio", { name: "claude-sonnet-4-6" }));
+    await user.click(screen.getByRole("button", { name: /Create container/i }));
+    await waitFor(() => expect(posted).toMatchObject({
+      image_variant: "full", config: expect.objectContaining({ model: "claude-sonnet-4-6" }),
+    }));
+    expect(posted).not.toHaveProperty("env_vars");
+    expect(posted).not.toHaveProperty("resource_limits");
+  });
   it("creates a container from a chosen template and the selected variant", async () => {
     const user = userEvent.setup();
     setupAuth();

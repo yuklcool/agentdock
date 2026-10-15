@@ -20,7 +20,7 @@ const DEFAULT_OPTION = { value: "", label: "Default (by image variant)" };
 
 function templateTags(t: Template): string[] {
   const tags: string[] = [];
-  if (t.model) tags.push(t.model);
+  if (t.model && t.driver !== "nanobot") tags.push(t.model);
   const toolCount = t.tools?.length ?? 0;
   const skillCount = t.skills?.length ?? 0;
   if (toolCount) tags.push(`${toolCount} tool${toolCount === 1 ? "" : "s"}`);
@@ -106,28 +106,29 @@ export default function CreateContainer() {
 
   const chosen = templates.find((t) => t.id === templateId) ?? templates[0];
   const effectiveTemplateId = templateId ?? chosen?.id ?? "";
+  const runtimeTemplate = chosen?.driver === "nanobot" ? undefined : chosen;
 
   // Defaults that follow the chosen template: model, image variant, and a
   // clean slate for memory/CPU (the backend layers the template's values;
   // the form only sends explicit picks).
   useEffect(() => {
-    setModel(chosen?.model ?? "");
+    setModel(chosen?.driver === "nanobot" ? "" : chosen?.model ?? "");
     setEffort(chosen?.effort ?? null);
     setFlags({});
-    setVariant((chosen?.image_variant as "full" | "slim") ?? "full");
+    setVariant((runtimeTemplate?.image_variant as "full" | "slim") ?? "full");
     setMemLimit("");
     setCpus("");
-    setEnvVars((chosen?.env_vars ?? []).map((v) => ({ ...v })));
+    setEnvVars((runtimeTemplate?.env_vars ?? []).map((v) => ({ ...v })));
     setEnvTouched(false);
   }, [chosen?.id]);
 
   const tplCpuLabel =
-    chosen?.cpus != null
-      ? CPU_OPTIONS.find((o) => Number(o.value) === chosen.cpus)?.label ?? `${chosen.cpus} CPU`
+    runtimeTemplate?.cpus != null
+      ? CPU_OPTIONS.find((o) => Number(o.value) === runtimeTemplate.cpus)?.label ?? `${runtimeTemplate.cpus} CPU`
       : null;
   const memOptions = [
-    chosen?.mem_limit
-      ? { value: "", label: `Template default (${chosen.mem_limit})` }
+    runtimeTemplate?.mem_limit
+      ? { value: "", label: `Template default (${runtimeTemplate.mem_limit})` }
       : DEFAULT_OPTION,
     ...MEM_OPTIONS,
   ];
@@ -362,16 +363,17 @@ export default function CreateContainer() {
             </div>
             <div className="nc-rev-body">
               <ReviewRow label="Template" value={chosen?.name ?? null} />
+              {chosen?.driver === "nanobot" && <ReviewRow label="初始化文件覆盖" value={Object.keys(chosen.nanobot_initial_files ?? {}).filter((name) => chosen.nanobot_initial_files?.[name as keyof typeof chosen.nanobot_initial_files] != null).join(", ") || "使用 Nanobot 默认"} />}
               <ReviewRow label="Name" value={name.trim() || null} mono />
               {admin && <ReviewRow label="绑定用户（可选）" value={ownerId
                 ? owners.find((u) => u.id === ownerId)?.email ?? ownerId
                 : "不绑定"} />}
               <ReviewRow label="Model" value={model || null} mono />
               <ReviewRow label="Driver" value={chosen?.driver ?? null} mono />
-              <ReviewRow label="Image" value={`${variant === "full" ? "Full" : "Slim"}${chosen?.image_variant === variant ? " (template)" : ""}`} />
+              <ReviewRow label="Image" value={`${variant === "full" ? "Full" : "Slim"}${runtimeTemplate?.image_variant === variant ? " (template)" : ""}`} />
               <ReviewRow label="Memory" value={
                 MEM_OPTIONS.find((o) => o.value === memLimit)?.label
-                  ?? (chosen?.mem_limit ? `${chosen.mem_limit} (template)` : null)
+                  ?? (runtimeTemplate?.mem_limit ? `${runtimeTemplate.mem_limit} (template)` : null)
               } />
               <ReviewRow label="CPUs" value={
                 CPU_OPTIONS.find((o) => o.value === cpus)?.label
