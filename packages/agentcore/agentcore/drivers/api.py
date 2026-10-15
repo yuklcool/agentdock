@@ -96,6 +96,8 @@ class ApiDriver:
 
     def _route(self, model: str, *, base_url: str | None = None) -> tuple[LLMClient, str]:
         if self._router is not None:
+            if base_url is None:
+                return self._router.route(model)
             return self._router.route(model, base_url=base_url)
         assert self._llm is not None
         return self._llm, model
