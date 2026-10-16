@@ -1226,6 +1226,10 @@ table.tbl{ width: 100%; border-collapse: separate; border-spacing: 0; font-size:
 .section-card-head .spacer{ margin-left:auto; }
 .section-card-body{ padding:14px; }
 
+/* The editor scrolls as a whole. Shrinking its children can collapse cards
+   with overflow:hidden, making their controls unreachable even at the bottom. */
+.template-form-fields > *{ flex-shrink:0; }
+
 /* ---- Loading skeleton (shimmer) ----------------------------------------- */
 .skel {
   display: inline-block;

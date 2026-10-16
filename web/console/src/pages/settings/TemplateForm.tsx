@@ -141,7 +141,7 @@ export default function TemplateForm() {
   return (
     <div className="responsive-editor responsive-split" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.25fr) minmax(0, 1fr)", height: "100%", overflow: "hidden", background: "var(--surface)" }}>
       {/* LEFT — ordered build form */}
-      <div className="responsive-editor-pane" style={{ overflow: "auto", padding: "22px 24px 28px", display: "flex", flexDirection: "column", gap: 18, borderRight: "1px solid var(--border)" }}>
+      <div className="responsive-editor-pane template-form-fields" style={{ minHeight: 0, overflow: "auto", padding: "22px 24px 28px", display: "flex", flexDirection: "column", gap: 18, borderRight: "1px solid var(--border)" }}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em" }}>
             {id ? "Edit template" : "New template"}
