@@ -1,6 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ResultPanel } from "./ResultPanel";
+import { copyText } from "../lib/clipboard";
+
+vi.mock("../lib/clipboard", () => ({ copyText: vi.fn(async () => true) }));
 
 const href = (p: string) => `/dl?path=${encodeURIComponent(p)}`;
 
@@ -8,6 +12,13 @@ const href = (p: string) => `/dl?path=${encodeURIComponent(p)}`;
 // formatOutput branches (tested via rendered output)
 // ---------------------------------------------------------------------------
 describe("ResultPanel — output formatting", () => {
+  it("renders Markdown text while the copy action preserves the source", async () => {
+    const { container } = render(<ResultPanel terminal result={{ output: "# Report\n\n**ready**" }} downloadHref={href} />);
+    expect(screen.getByRole("heading", { name: "Report", level: 1 })).toBeInTheDocument();
+    expect(container.querySelector("strong")).toHaveTextContent("ready");
+    await userEvent.click(screen.getByRole("button", { name: "Copy output" }));
+    expect(copyText).toHaveBeenCalledWith("# Report\n\n**ready**");
+  });
   it("pretty-prints an object as indented JSON", () => {
     render(
       <ResultPanel terminal result={{ success: true, output: { value: 42 } }} downloadHref={href} />,
