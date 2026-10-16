@@ -1,5 +1,6 @@
 import { Icons } from "../ui/Icon";
 import { CopyButton } from "./CopyButton";
+import { Markdown } from "./Markdown";
 
 interface ResultLike {
   success?: boolean;
@@ -8,7 +9,7 @@ interface ResultLike {
   reason?: string | null;
 }
 
-/** Render the task output as readable text — pretty-print objects/JSON, leave strings as-is. */
+/** Preserve original strings for copying; pretty-print structured output. */
 function formatOutput(output: unknown): string {
   if (typeof output === "string") return output;
   try {
@@ -49,7 +50,9 @@ export function ResultPanel({
       </div>
 
       {hasOutput ? (
-        <pre className="result-output">{text}</pre>
+        typeof result?.output === "string"
+          ? <Markdown className="result-output" text={text} />
+          : <pre className="result-output">{text}</pre>
       ) : (
         <p className="result-empty">
           {terminal

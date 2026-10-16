@@ -4,6 +4,7 @@ import type { Event } from "../api/types";
 import { containerFileRawUrl } from "../api/fileUrls";
 import { stepDurations } from "../lib/timing";
 import { formatDuration } from "../lib/format";
+import { Markdown } from "./Markdown";
 function downloadHref(cid: string, path: string) {
   return containerFileRawUrl(cid, path);
 }
@@ -403,7 +404,7 @@ function ToolStep({ item }: { item: Extract<Item, { kind: "tool" }> }) {
 function ItemView({ item, cid }: { item: Item; cid: string }) {
   switch (item.kind) {
     case "message":
-      return <div className="ev-msg">{item.text}</div>;
+      return <Markdown className="ev-msg" text={item.text} />;
     case "progress":
       return <div className="ev-line"><Icons.ArrowRight /><span>{item.text}</span></div>;
     case "tool":
@@ -438,7 +439,7 @@ function ItemView({ item, cid }: { item: Item; cid: string }) {
         <div className="ev-result">
           <div className="ev-result-head"><Icons.Check /><span>Result</span></div>
           {typeof item.output === "string"
-            ? <div className="ev-result-text">{item.output}</div>
+            ? <Markdown className="ev-result-text" text={item.output} />
             : <pre className="ev-result-json">{JSON.stringify(item.output, null, 2)}</pre>}
         </div>
       );

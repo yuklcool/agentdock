@@ -10,6 +10,33 @@ function evt(seq: number, type: string, payload: Record<string, unknown>, sec = 
   return { seq, type: type as Event["type"], ts, payload };
 }
 
+describe("ChatTimeline — Markdown presentation", () => {
+  it("renders streamed text as Markdown through completion and history replay", () => {
+    const first = evt(1, "assistant_delta", { stream_id: "s", text: "## Response\n\n**hel" });
+    const second = evt(2, "assistant_delta", { stream_id: "s", text: "lo**" });
+    const { container, rerender } = render(<ChatTimeline cid="c" events={[first]} endMs={0} />);
+    expect(screen.getByRole("heading", { name: "Response" })).toBeInTheDocument();
+    rerender(<ChatTimeline cid="c" events={[first, second]} endMs={0} />);
+    expect(container.querySelector("strong")).toHaveTextContent("hello");
+    // A completed result supersedes the identical streamed answer.
+    rerender(<ChatTimeline cid="c" events={[first, second]} result={"## Response\n\n**hello**"} endMs={0} />);
+    expect(screen.getAllByRole("heading", { name: "Response" })).toHaveLength(1);
+    expect(container.querySelector(".ev-result-text strong")).toHaveTextContent("hello");
+    rerender(<ChatTimeline cid="c" events={[evt(1, "assistant_message", { content: [{ type: "text", text: "## History" }] })]} endMs={0} />);
+    expect(screen.getByRole("heading", { name: "History" })).toBeInTheDocument();
+  });
+
+  it("keeps tool output and structured results in their raw representation", () => {
+    const { container } = render(<ChatTimeline cid="c" events={[
+      evt(1, "tool_call", { tool_use_id: "t", name: "bash", input: {} }),
+      evt(2, "tool_result", { tool_use_id: "t", content: "# raw log", ok: true }),
+    ]} result={{ title: "# raw JSON" }} endMs={0} />);
+    expect(container.querySelector(".ev-result-json")).toHaveTextContent('"title": "# raw JSON"');
+    expect(container.querySelector(".ev-out")).toHaveTextContent("# raw log");
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+  });
+});
+
 // ─── core event-type dispatch ──────────────────────────────────────────────
 
 describe("buildItems — core event types", () => {
