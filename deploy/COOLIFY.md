@@ -1,10 +1,14 @@
 # Coolify deployment runbook
 
 ## Prerequisites
-- Registry resource deployed (deploy/registry/) and reachable at https://registry.example.com.
-- Agent image built for the validated `linux/amd64` platform and pushed: `registry.example.com/agent-runtime:<AGENT_IMAGE_TAG>`.
-- Control-plane env has `AGENT_REGISTRY` + `AGENT_REGISTRY_USERNAME` + `AGENT_REGISTRY_PASSWORD`
-  (the control plane pulls the private image with these — no host `docker login` needed; see Task 6).
+- A Coolify-managed Postgres on the same destination network as the app.
+- The AgentDock runtime image for the validated `linux/amd64` platform. The default
+  registry is `ghcr.io/yuklcool/agentdock`, so the control plane pulls
+  `ghcr.io/yuklcool/agentdock/agent-runtime:<AGENT_IMAGE_TAG>`. Use the version you
+  have published (the example matches `deploy/quickstart/VERSION`); do not substitute
+  an upstream agenhood image, which does not include AgentDock's Nanobot integration.
+  For private packages set `AGENT_REGISTRY_USERNAME` + `AGENT_REGISTRY_PASSWORD`; for
+  another registry also set `AGENT_REGISTRY` (a host `docker login` is not seen).
 - Provisioning pulls: `AGENT_IMAGE_PULL_POLICY=if-not-present` (default) makes creates
   skip the registry when the image is already on the host; a background sweep pre-pulls
   `AGENT_IMAGE_TAG` every `IMAGE_PREPULL_INTERVAL_SECONDS` (600) so version bumps are
@@ -16,10 +20,41 @@
 - New Resource → Docker Compose.
 - Base Directory: `/`  (build contexts use `../`, so the repo root must be the build root).
 - Compose file: `/deploy/docker-compose.coolify.yml`.
-- Paste env from `deploy/.env.coolify.example` (fill real secrets).
-- Set the domain `agent.example.com` on the `reverse-proxy` service (container port 80).
+- Set the domain on the `reverse-proxy` service (container port 80). Public URLs are
+  derived from Coolify's `SERVICE_FQDN_REVERSE_PROXY` value. The domain declaration
+  uses `SERVICE_FQDN_REVERSE_PROXY_80`, matching the normalized `reverse-proxy`
+  service name ([Coolify naming reference](https://coolify.io/docs/applications/builds/docker-compose)).
+- Set the required env (see `deploy/.env.coolify.example`):
+  - `DATABASE_URL`, `AGENT_IMAGE_TAG`, `SEED_STAFF_EMAIL`
+  Deploys are blocked while `DATABASE_URL` or `AGENT_IMAGE_TAG` is empty.
+- On a **new deployment**, leave the secrets unset. Coolify generates and keeps
+  `SERVICE_REALBASE64_32_CREDENTIALKEY`, `SERVICE_REALBASE64_32_CONNECTORSKEY`,
+  `SERVICE_HEX_64_SEARXNG` and `SERVICE_PASSWORD_ADMIN`. Setting the plain variable
+  (e.g. `CREDENTIAL_ENCRYPTION_KEY`) overrides the generated one. Never change either
+  encryption key once data exists.
 - Confirm the control-plane service has the Docker socket mount allowed.
-- Deploy.
+- Deploy, then sign in with `SEED_STAFF_EMAIL` and `SEED_STAFF_PASSWORD` if explicitly
+  set, otherwise the `SERVICE_PASSWORD_ADMIN` value. You must change the password on
+  first sign-in.
+
+## Existing deployments
+
+- Keep existing `CREDENTIAL_ENCRYPTION_KEY` and `CONNECTORS_MASTER_KEY` values
+  unchanged. Explicit values take precedence over generated fallbacks; removing
+  or rotating them makes existing encrypted credentials unreadable.
+- Keep your current `AGENT_IMAGE_TAG`, registry and pull credentials. This update
+  changes deployment configuration only and does not require rebuilding runtime images.
+- Keep explicit `CONNECTORS_PUBLIC_BASE_URL` and `CONNECTORS_CONSOLE_REDIRECT_URL`
+  overrides if they are needed for your domain. Otherwise set the domain on
+  `reverse-proxy` so Coolify supplies `SERVICE_FQDN_REVERSE_PROXY`.
+- Remove the obsolete `TRAEFIK_BACKEND_NETWORK` variable. The reverse proxy no
+  longer joins the compose `default` network, avoiding unreachable backend IPs.
+  Do not add that network or a parameterized `traefik.docker.network` label back.
+- Preserve `AGENTDOCK_NANOBOT_SSRF_WHITELIST` where configured: it is shared by the
+  control plane and egress proxy. `AGENTDOCK_MCP_TEST_PROXY` still routes MCP tests
+  through `http://egress-proxy:8888`.
+- Save the updated Compose definition and redeploy the Coolify resource. Existing
+  administrator accounts and password-change requirements are unchanged.
 
 ## Proxy/SearXNG config sanity (baked, not bind-mounted)
 The declawed Traefik and SearXNG ship their config baked into their images
@@ -80,3 +115,4 @@ docker exec "$AGENT" sh -c 'curl -s -m 5 https://example.com -o /dev/null && ech
 docker exec "$AGENT" sh -c 'curl -s -m 5 -x http://egress-proxy:8888 https://example.com -o /dev/null && echo PROXY_OK || echo PROXY_FAIL'
 ```
 Expected: `DIRECT_BLOCKED` (no gateway on the internal network) and `PROXY_OK` (only path out is the egress proxy).
+
